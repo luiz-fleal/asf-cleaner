@@ -5,7 +5,6 @@ from rasterio.transform import from_origin
 
 from asf_cleaner.harmonize import harmonize
 from asf_cleaner.opera import clean_point
-from asf_cleaner.search import search  # noqa: F401  (import check)
 
 
 def write_tif(path, arr, dtype):
@@ -43,6 +42,8 @@ def _rows(sensor, pols, vals, track=1):
 
 
 def test_harmonize():
-    n = harmonize(pd.DataFrame(_rows("NISAR", ["HH", "HV"], [-10, -9, -8, -9, -10])))
+    rows = _rows("NISAR", ["HH", "HV"], [-10, -9, -8]) + _rows("NISAR", ["HH"], [-10])[:1]  # duplicate
+    n = harmonize(pd.DataFrame(rows))
+    assert len(n) == 6  # duplicate scene/pol dropped
     assert set(n.pol_class) == {"co", "cross"} and set(n.band) == {"L"}
-    assert abs(n.z_median[n.polarization == "HH"].mean()) < 1e-9
+    assert "z_median" not in n.columns

@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 import fsspec
 import h5py
+import rasterio
 import requests
 
 
@@ -37,8 +38,6 @@ def open_remote_h5(url: str, token: str, block_size: int = 4 * 1024 * 1024):
 @contextmanager
 def open_remote_tif(url: str, token: str | None):
     """Open a GeoTIFF with GDAL range reads. token=None means a local path (tests)."""
-    import rasterio
-
     if token is None:
         with rasterio.open(url) as ds:
             yield ds

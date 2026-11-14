@@ -1,7 +1,7 @@
 [project]
 name = "asf-cleaner"
 version = "0.1.0"
-description = "Stream and clean ASF NISAR GCOV data at a point"
+description = "Stream and clean ASF NISAR and OPERA-S1 backscatter at a point"
 readme = "README.md"
 authors = [
     { name = "LiuzF-05", email = "luizfsilvacs@gmail.com" }

@@ -1,6 +1,5 @@
 """Cleaning for OPERA RTC-S1 (Sentinel-1, C-band): per-burst GeoTIFFs, gamma0 linear power."""
 import numpy as np
-import rasterio
 from pyproj import Transformer
 from rasterio.windows import Window
 

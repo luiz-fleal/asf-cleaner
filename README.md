@@ -85,7 +85,6 @@ few network requests, so raise the cap deliberately for very long ranges.
 | `backscatter_db_mean`, `_median`, `_center` | Backscatter in dB over the window, and the point pixel |
 | `window_m`, `window_px`, `pixel_spacing_m` | Footprint actually read |
 | `normalization` | Radiometric normalization (gamma0 for both; see caveats) |
-| `z_median` | z-score of the median within its own series, for plotting trends. Empty for series shorter than 3 scenes |
 
 ## Using the output
 - **One series at a time:** filter to a single burst, track, direction and polarization before
