@@ -86,15 +86,41 @@ few network requests, so raise the cap deliberately for very long ranges.
 | `window_m`, `window_px`, `pixel_spacing_m` | Footprint actually read |
 | `normalization` | Radiometric normalization (gamma0 for both; see caveats) |
 
-## Using the output
-- **One series at a time:** filter to a single burst, track, direction and polarization before
-  plotting or testing trends. Different tracks view the site from different angles and have
-  different levels.
-- **Prefer the median** over the centre pixel (speckle). Drop low `valid_fraction` rows.
-- **Cross-pol** (HV/VH) is the better channel for vegetation change; co-pol (HH/VV) responds more
-  to soil moisture and surface changes.
-- **Deseasonalize** before testing for a trend (Theil-Sen / Mann-Kendall work well). Slow drifts
-  under about 1 dB are hard to separate from noise and seasonal changes.
+## Analysis (`asf-analyze`)
+Reads the Parquet (or CSV) output **lazily with Polars**, so only the series you select is loaded.
+
+    uv run asf-analyze out/opera_-47.9_-15.8.parquet        # list the available series
+    uv run asf-analyze out/opera_-47.9_-15.8.parquet \
+        --track 24 --direction DESCENDING --polarization VH --plot series.png
+
+For one series (same burst, track, direction, polarization; scenes below `--min-valid`, default
+0.8, are dropped) it reports:
+
+1. **Median level and spread** of `backscatter_db_median`.
+2. **Deseasonalized anomaly:** value minus the median for that calendar month. Only done when the
+   series spans at least 2 years; otherwise it warns and uses the overall median.
+3. **Trend:** Theil-Sen slope in dB/year with a 95% CI and a Mann-Kendall p-value. Needs at least
+   2 years and 10 scenes. The p-value assumes independent samples, so it is optimistic; prefer
+   the CI and look at the plot.
+4. **Sustained events:** runs of at least `--min-run` (3) consecutive scenes more than
+   `--threshold` (2.5) dB from the baseline, in the same direction. A single spike (rain,
+   speckle) is deliberately not reported.
+5. **Cross-pol minus co-pol (dB)** per date: higher means relatively more volume scattering
+   (vegetation), lower means more surface scattering.
+6. **A PNG** (`--plot`) with the series, the anomaly with event spans, and the cross/co ratio.
+
+The same functions can be imported (`from asf_cleaner import analysis`): `scan`, `list_series`,
+`select_series`, `deseasonalize`, `trend`, `detect_events`, `cross_pol_ratio`.
+
+Practical notes:
+- **Prefer the median** over the centre pixel (speckle).
+- **Cross-pol** (HV/VH) is the better channel for vegetation change; co-pol (HH/VV) responds
+  more to soil moisture and surface changes.
+- **An anomaly says something changed, not what.** Confirm with rainfall, optical imagery or
+  known event dates before calling it an event.
+- **Series with `valid_fraction` near 0** mean the point has no valid data in those scenes (for
+  example outside the swath); they are excluded automatically.
+- Seasonality and trend need years of data, so they suit OPERA. NISAR currently has a few months.
 
 ## Caveats
 - **Masks differ by dataset.** OPERA: shadow/layover/invalid pixels are removed (mask 0 = valid).
