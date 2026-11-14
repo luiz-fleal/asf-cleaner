@@ -1,8 +1,9 @@
 """Run per-scene work in parallel (threads or spawned processes) with isolation and retries."""
 import logging
 import multiprocessing
+import threading
 import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 
 import requests
@@ -88,3 +89,42 @@ def run_parallel(fn, items, workers: int, kind: str, label=str) -> list[Result]:
         return results
     pool.shutdown()
     return results
+
+
+def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | None = None):
+    """Like run_parallel, but yields each Result as soon as it finishes (for streaming clients).
+
+    Setting `cancel` (or closing the generator) stops waiting and cancels scenes not yet started.
+    """
+    items = list(items)
+    n = len(items)
+    if n == 0:
+        return
+    workers = max(1, min(workers, n))
+    if workers == 1:
+        for it in items:
+            if cancel is not None and cancel.is_set():
+                return
+            rows, err, secs = _timed(fn, it)
+            yield Result(it, rows, err, secs)
+        return
+
+    if kind == "process":
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
+    else:
+        pool = ThreadPoolExecutor(max_workers=workers)
+    futures = {pool.submit(_timed, fn, it): it for it in items}
+    pending = set(futures)
+    try:
+        while pending:
+            if cancel is not None and cancel.is_set():
+                break
+            # short timeout so a cancel is noticed within half a second, not when a scene ends
+            finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            for f in finished:
+                try:
+                    yield Result(futures[f], *f.result())
+                except Exception as e:  # pool-level failure (e.g. a worker process died)
+                    yield Result(futures[f], None, f"{type(e).__name__}: {e}", 0.0)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)

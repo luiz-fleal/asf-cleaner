@@ -147,6 +147,36 @@ Practical notes:
   example outside the swath); they are excluded automatically.
 - Seasonality and trend need years of data, so they suit OPERA. NISAR currently has a few months.
 
+## HTTP API (`asf-api`)
+Serves the same cleaning pipeline over HTTP, **on demand**: nothing is precomputed. A request
+searches ASF, reads only the needed pixels of each scene and streams the cleaned rows back as
+Server-Sent Events while the scenes finish, so a client can draw the series as it is built.
+
+    export EARTHDATA_TOKEN=...          # stays on the server, never sent to clients
+    uv run asf-api                       # http://127.0.0.1:8000, interactive docs at /docs
+
+| Endpoint | Returns |
+|---|---|
+| `GET /health` | `{status, tokenConfigured, maxJobs}` |
+| `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `done` (or `fatal`) |
+| `GET /series` | The same data as one JSON document, once every scene is done |
+
+Query parameters (both series endpoints): `lon`, `lat` (required), `start`, `end`, `dataset`
+(`auto`, `NISAR`, `OPERA`), `window_m` (30 to 5000), `max_results` (default 400, max 1000),
+`workers` (1 to 16), `cache` (`false` ignores the cache).
+
+    curl -N 'http://127.0.0.1:8000/series/stream?lon=-60.0217&lat=-3.119&start=2026-06-01'
+
+Each `rows` event holds `rows: [{scene, sensor, band, platform, t (epoch ms), burst, track, direction,
+pol, polClass, db (median dB), dbMean, dbCenter, valid}]`, plus `source` (`cache` or `live`), `done`
+and `total`. Closing the connection cancels the scenes not yet started. Scenes already processed
+are served from the same cache as the CLI (`ASF_CACHE_DIR`, default `out`).
+
+Environment: `ASF_CACHE_DIR` (cache folder), `ASF_API_CORS` (comma-separated allowed origins,
+default the Vite dev server), `ASF_API_MAX_JOBS` (concurrent requests, default 4; more get HTTP 503).
+Timing is network-bound: a NISAR scene takes about a minute and a half, an OPERA scene a few
+seconds, so the first request for a new point is slow and repeats are instant.
+
 ## Caveats
 - **Masks differ by dataset.** OPERA: shadow/layover/invalid pixels are removed (mask 0 = valid).
   NISAR: pixels are removed when the "valid samples" mask is 0 (not fully focused) or 255
