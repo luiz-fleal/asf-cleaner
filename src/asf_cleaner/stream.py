@@ -32,3 +32,18 @@ def open_remote_h5(url: str, token: str, block_size: int = 4 * 1024 * 1024):
     with fsspec.open(signed, "rb", block_size=block_size, cache_type="readahead") as f:
         with h5py.File(f, "r") as h5:
             yield h5
+
+
+@contextmanager
+def open_remote_tif(url: str, token: str | None):
+    """Open a GeoTIFF with GDAL range reads. token=None means a local path (tests)."""
+    import rasterio
+
+    if token is None:
+        with rasterio.open(url) as ds:
+            yield ds
+        return
+    signed = resolve_url(url, token)
+    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3"):
+        with rasterio.open(f"/vsicurl/{signed}") as ds:
+            yield ds

@@ -2,7 +2,8 @@ import h5py
 import numpy as np
 from pyproj import Transformer
 
-from asf_cleaner.nisar import FREQ_GROUP, clean_point, to_db
+from asf_cleaner.common import to_db
+from asf_cleaner.nisar import FREQ_GROUP, clean_point
 
 
 def make_h5(path):
@@ -18,6 +19,7 @@ def make_h5(path):
         d[501, 500] = 0.0
         g["HHHH"] = d
         g["HVHV"] = d * 0.1
+        g["HHHH"].attrs["description"] = "Radar backscatter gamma0 power"
         g["HHHV"] = d  # off-diagonal term, must be ignored
 
 
@@ -31,10 +33,10 @@ def test_clean_point(tmp_path):
     p = tmp_path / "t.h5"
     make_h5(p)
     with h5py.File(p) as h5:
-        rows = clean_point(h5, -47.9, -15.8, window=5)
+        rows = clean_point(h5, -47.9, -15.8, window_m=100)
     assert {r["polarization"] for r in rows} == {"HH", "HV"}
     hh = next(r for r in rows if r["polarization"] == "HH")
-    assert hh["valid_fraction"] < 1 and np.isclose(hh["sigma0_db_median"], -10)
+    assert hh["valid_fraction"] < 1 and np.isclose(hh["backscatter_db_median"], -10)
 
 
 def test_outside(tmp_path):
