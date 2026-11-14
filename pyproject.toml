@@ -1,0 +1,31 @@
+[project]
+name = "asf-cleaner"
+version = "0.1.0"
+description = "Stream and clean ASF NISAR GCOV data at a point"
+readme = "README.md"
+authors = [
+    { name = "LiuzF-05", email = "luizfsilvacs@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.14.5",
+    "fsspec>=2026.9.0",
+    "h5py>=3.16.0",
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+    "pyarrow>=26.0.1",
+    "pyproj>=3.8.0",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+asf-clean = "asf_cleaner.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
