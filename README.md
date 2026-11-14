@@ -13,12 +13,21 @@ It has **two independent modes**, chosen from the time range you ask for:
 The two datasets are **not** compared, calibrated against each other or merged. Analyse each one on
 its own.
 
+**IMERG** daily rain (NASA GPM) is retrieved alongside the backscatter with **either** SAR mode and
+written to `imerg_<lon>_<lat>`; rain columns (`rain_1d_mm`, ...) are also added to the SAR table.
+
 ## Setup
 
     uv sync
     export EARTHDATA_TOKEN=...        # or put it in a .env file (keep .env out of git)
 
 Create the token at https://urs.earthdata.nasa.gov ("Generate Token").
+
+**IMERG needs one extra step.** Rain data is hosted by NASA GES DISC, which is authorized separately
+from ASF. Once, in Earthdata Login: Applications > Authorized Apps > Approve More Applications, and
+approve **NASA GESDISC DATA ARCHIVE** (plus an OPeNDAP application if one is listed). Without it the
+run still finishes: the SAR data is written and IMERG is skipped with a message saying so. Test
+access with `uv run python -m asf_cleaner.imerg -60.025 -1.74118`.
 
 ## Usage
 
@@ -45,6 +54,7 @@ Longitude is negative west of Greenwich (`-47.9` is Brazil, `47.9` is Madagascar
 | `--window-m` | 500 | Ground footprint in meters read around the point |
 | `--workers` | 8 | Scenes processed in parallel (`1` = sequential) |
 | `--no-cache` | off | Refetch everything and ignore the cache |
+| `--no-imerg` | off | Skip the IMERG rain data |
 | `--out` | `out` | Output folder |
 
 Defaults can also be edited in `src/asf_cleaner/config.py`.
@@ -111,6 +121,26 @@ and already-processed scenes are never fetched again.
 | `normalization` | Radiometric normalization (gamma0 for both; see caveats) |
 | `processing_version` | Version of the cleaning logic that produced the row (used by the cache) |
 
+## Rain: IMERG (`imerg_<lon>_<lat>`)
+NASA GPM IMERG V07 **daily** precipitation (0.1 degree grid, mm/day, total of the UTC day), at the
+grid cell containing the point. Fetched with OPeNDAP, one tiny request per day (no files are
+downloaded), in parallel and cached like the SAR scenes.
+
+- **Range:** `--start - 30 days` to `--end`, so the first scenes still have a full 30-day history.
+- **Final, then Late:** per day, the Final run (gauge-adjusted) when it exists, otherwise the Late
+  run. Final currently ends 2025-09-30, so NISAR-era days always come from Late. `imerg_run` says
+  which one each day used; a day cached from Late is refetched once Final appears for it. The
+  newest day or two are not published yet and are simply absent.
+- **Columns:** `date`, `precipitation_mm_day`, `imerg_run`, `granule`, `grid_lon`, `grid_lat`
+  (the cell centre actually used), `units`, `processing_version`.
+- **Rain before each acquisition** is added to the SAR table:
+  `rain_d0_mm` (the acquisition's own UTC day; daily totals can't be split at the overpass time, so
+  this may include rain after the pass) and `rain_1d_mm`, `rain_3d_mm`, `rain_7d_mm`, `rain_30d_mm`
+  (totals of the N days **before** the acquisition day). A value is empty if any day it needs is
+  missing.
+- **A rain problem never costs you the SAR data.** If IMERG access fails, the SAR file is still
+  written without the rain columns.
+
 ## Analysis (`asf-analyze`)
 Reads the Parquet (or CSV) output **lazily with Polars**, so only the series you select is loaded.
 
@@ -128,21 +158,36 @@ For one series (same burst, track, direction, polarization; scenes below `--min-
    2 years and 10 scenes. The p-value assumes independent samples, so it is optimistic; prefer
    the CI and look at the plot.
 4. **Sustained events:** runs of at least `--min-run` (3) consecutive scenes more than
-   `--threshold` (2.5) dB from the baseline, in the same direction. A single spike (rain,
-   speckle) is deliberately not reported.
-5. **Cross-pol minus co-pol (dB)** per date: higher means relatively more volume scattering
+   `--threshold` (2.5) dB from the baseline, in the same direction.
+5. **Isolated outliers:** the same test but shorter than `--min-run` scenes (a single dip, say).
+   They are not events, but they are listed separately so they are not silently dropped.
+6. **Rain context** for every event and outlier, from the IMERG columns `asf-clean` adds:
+   `rain_context` is `wet` if IMERG showed at least `--rain-mm` (10) mm on the acquisition day or the
+   day before, `dry` if less, `unknown` if there is no rain data. The rain at the first scene of
+   the run is shown too (`onset_rain_d0_mm`, `_1d`, `_3d`, `_7d`, `_30d`). Files made before IMERG
+   support have no rain columns: the analysis says so and reports `unknown`.
+7. **Cross-pol minus co-pol (dB)** per date: higher means relatively more volume scattering
    (vegetation), lower means more surface scattering.
-6. **A PNG** (`--plot`) with the series, the anomaly with event spans, and the cross/co ratio.
+8. **Gaps** longer than 45 days (no scenes in the series). Often another polarization was
+   acquired instead (some periods are VV-only), or the point had no valid data.
+9. **A PNG** (`--plot`): backscatter, the anomaly (event spans shaded, outliers marked and coloured
+   by rain context), the cross/co ratio, and a **daily IMERG rain panel**. The rain comes from the
+   `imerg_*` file next to the input (or `--rain FILE`); without it the panel shows the rain of the
+   3 days before each scene, and without any rain data there is no rain panel. Lines are broken
+   across gaps instead of bridging them.
 
 The same functions can be imported (`from asf_cleaner import analysis`): `scan`, `list_series`,
-`select_series`, `deseasonalize`, `trend`, `detect_events`, `cross_pol_ratio`.
+`select_series`, `deseasonalize`, `trend`, `detect_events`, `detect_spikes`, `add_rain_context`,
+`find_gaps`, `load_daily_rain`, `cross_pol_ratio`.
 
 Practical notes:
 - **Prefer the median** over the centre pixel (speckle).
 - **Cross-pol** (HV/VH) is the better channel for vegetation change; co-pol (HH/VV) responds
   more to soil moisture and surface changes.
-- **An anomaly says something changed, not what.** Confirm with rainfall, optical imagery or
-  known event dates before calling it an event.
+- **An anomaly says something changed, not what.** `wet` makes rain a plausible cause and `dry`
+  makes it a less likely one, but IMERG cells are about 11 km wide: `dry` can miss a local storm and
+  `wet` can be rain that fell elsewhere or after the overpass (daily totals can't be split at the
+  pass time). Confirm with optical imagery or known event dates before calling it an event.
 - **Series with `valid_fraction` near 0** mean the point has no valid data in those scenes (for
   example outside the swath); they are excluded automatically.
 - Seasonality and trend need years of data, so they suit OPERA. NISAR currently has a few months.
@@ -174,6 +219,7 @@ are served from the same cache as the CLI (`ASF_CACHE_DIR`, default `out`).
 
 Environment: `ASF_CACHE_DIR` (cache folder), `ASF_API_CORS` (comma-separated allowed origins,
 default the Vite dev server), `ASF_API_MAX_JOBS` (concurrent requests, default 4; more get HTTP 503).
+The API serves the SAR backscatter only; IMERG rain is a CLI output for now.
 Timing is network-bound: a NISAR scene takes about a minute and a half, an OPERA scene a few
 seconds, so the first request for a new point is slow and repeats are instant.
 
@@ -191,6 +237,10 @@ seconds, so the first request for a new point is slow and repeats are instant.
   was reprocessed in 2025; NISAR is early in its mission, so calibration may change. Watch for
   steps in a long series at those boundaries.
 - **Single patch:** results describe the window around the point (`--window-m`), not the surrounding area.
+- **Rain is coarse.** An IMERG cell is about 11 km wide, far larger than the SAR window, so it is
+  the regional rain, not the rain on the patch. Convective storms can miss the point entirely.
+- **Mixed IMERG runs:** Final (gauge-adjusted) and Late (not) can differ systematically. Check
+  `imerg_run` before comparing rain across 2025-09-30.
 
 ## Development
 

@@ -168,7 +168,7 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setitem(cli.WORKERS, "OPERA", worker)
     args = ["--dataset", "OPERA", "--start", "2018-01-01", "--end", "2018-02-28",
-            "--workers", "1", "--out", str(tmp_path)]
+            "--workers", "1", "--no-imerg", "--out", str(tmp_path)]
     state["tmp"] = tmp_path
     state["run"] = lambda *extra: cli.main(args + list(extra))
     state["out"] = lambda: pd.read_parquet(tmp_path / "opera_-47.9_-15.8.parquet")

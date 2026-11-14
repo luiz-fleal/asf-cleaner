@@ -31,12 +31,12 @@ def load(path: Path, version: int) -> pd.DataFrame:
     return df[df["processing_version"] == version].reset_index(drop=True)
 
 
-def save(path: Path, old: pd.DataFrame, new_rows: list[dict]) -> None:
+def save(path: Path, old: pd.DataFrame, new_rows: list[dict], key: list[str] = KEY) -> None:
     """Merge new rows into the cache atomically (temp file + rename)."""
     parts = [d for d in (old, pd.DataFrame(new_rows)) if len(d)]
     if not parts:
         return
-    df = pd.concat(parts, ignore_index=True).drop_duplicates(KEY, keep="last")
+    df = pd.concat(parts, ignore_index=True).drop_duplicates(key, keep="last")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     df.to_parquet(tmp, index=False)

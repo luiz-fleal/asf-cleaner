@@ -26,3 +26,4 @@ def process_nisar(sc, *, lon, lat, window_m, token):
 def process_opera(sc, *, lon, lat, window_m, token):
     rows = retry(lambda: opera.clean_point(sc["tifs"], token, lon, lat, window_m))
     return [{**_meta("OPERA", sc), **r} for r in rows]
+

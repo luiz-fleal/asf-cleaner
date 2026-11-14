@@ -22,3 +22,4 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop_duplicates(["sensor", "burst_id", "track", "start_time", "polarization"],
                             keep="last")
     return df.sort_values(["sensor", "start_time"])[COLUMNS].reset_index(drop=True)
+

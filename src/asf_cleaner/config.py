@@ -22,6 +22,14 @@ PROCESSING_VERSION = 2
 # holds a global lock while reading over the network, so it needs separate processes.
 EXECUTORS = {"NISAR": "process", "OPERA": "thread"}
 
+# NASA GPM IMERG V07 daily precipitation (GES DISC): short name and CMR collection id.
+# "final" is gauge-adjusted but ends 2025-09-30; "late" runs up to yesterday.
+IMERG_COLLECTIONS = {
+    "final": ("GPM_3IMERGDF", "C2723754864-GES_DISC"),
+    "late": ("GPM_3IMERGDL", "C2723754859-GES_DISC"),
+}
+IMERG_LOOKBACK_DAYS = 30  # rain is fetched this many days before --start (for antecedent sums)
+
 ASF_SEARCH_URL = "https://api.daac.asf.alaska.edu/services/search/param"
 TIME_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -38,6 +46,7 @@ class Settings:
     dataset: str = "auto"
     workers: int = DEFAULT_WORKERS
     use_cache: bool = True
+    imerg: bool = True
 
 
 def parse_time(s: str, end_of_day: bool = False) -> datetime:
