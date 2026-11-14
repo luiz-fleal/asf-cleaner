@@ -78,3 +78,33 @@ def test_range_parsing():
     assert e == now and (e - s).days == 180
     with pytest.raises(ValueError):
         resolve_range("2026-06-02", "2026-06-01")
+
+
+# ---- legacy datapool URLs ------------------------------------------------------------------
+NAME = "OPERA_L2_RTC-S1_T010-020420-IW3_20250704T093925Z_20250710T173632Z_S1A_30_v1.0"
+S3 = [f"s3://asf-cumulus-prod-opera-browse/OPERA_L2_RTC-S1/{NAME}/{NAME}_BROWSE.png",
+      f"s3://asf-cumulus-prod-opera-products/OPERA_L2_RTC-S1/{NAME}/{NAME}_VV.tif.md5",
+      f"s3://asf-cumulus-prod-opera-products/OPERA_L2_RTC-S1/{NAME}/{NAME}_VV.tif",
+      f"s3://asf-cumulus-prod-opera-products/OPERA_L2_RTC-S1/{NAME}/{NAME}_VH.tif",
+      f"s3://asf-cumulus-prod-opera-products/OPERA_L2_RTC-S1/{NAME}/{NAME}_mask.tif"]
+CLOUD = f"https://cumulus.asf.earthdatacloud.nasa.gov/OPERA/OPERA_L2_RTC-S1/{NAME}/{NAME}"
+
+
+def test_legacy_datapool_urls_rewritten():
+    legacy = f"https://datapool.asf.alaska.edu/RTC/OPERA-S1/{NAME}_VV.tif"
+    assert S._cloud_url(legacy, S3) == CLOUD + "_VV.tif"  # not the .md5 neighbour
+    assert S._cloud_url(CLOUD + "_VV.tif", S3) == CLOUD + "_VV.tif"  # already fine: untouched
+    assert S._cloud_url(legacy, []) == legacy  # no s3 info: fall back to the original
+
+
+def test_search_returns_cloud_urls_for_legacy_granules(monkeypatch):
+    t = datetime(2025, 7, 4, tzinfo=UTC)
+    feat = {"properties": {
+        "sceneName": NAME, "startTime": "2025-07-04T09:39:25Z", "flightDirection": "DESCENDING",
+        "pathNumber": 10, "platform": "Sentinel-1A", "operaBurstID": "T010_020420_IW3",
+        "url": f"https://datapool.asf.alaska.edu/RTC/OPERA-S1/{NAME}.h5", "s3Urls": S3,
+        "additionalUrls": [f"https://datapool.asf.alaska.edu/RTC/OPERA-S1/{NAME}_{x}.tif" for x in ("VH", "VV", "mask")]}}
+    monkeypatch.setattr(S, "_count", lambda *a: 1)
+    monkeypatch.setattr(S, "_features", lambda *a: [feat])
+    sc = S.search("OPERA", 0, 0, t, t + timedelta(days=1))[0]
+    assert sc["tifs"] == {x: f"{CLOUD}_{x}.tif" for x in ("VH", "VV", "mask")}

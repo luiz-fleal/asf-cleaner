@@ -6,6 +6,7 @@ piece fits in one request; pieces are visited newest-first and we stop at ``max_
 """
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import requests
 
@@ -63,6 +64,26 @@ def _collect(kind, lon, lat, t0, t1, need) -> list:
     return newer + older
 
 
+LEGACY_HOST = "datapool.asf.alaska.edu"
+PRODUCTS_BUCKET = "s3://asf-cumulus-prod-opera-products/"
+CLOUD_PREFIX = "https://cumulus.asf.earthdatacloud.nasa.gov/OPERA/"
+
+
+def _cloud_url(url: str, s3_urls: list[str]) -> str:
+    """Older OPERA granules list a legacy datapool.asf.alaska.edu URL. It redirects across hosts
+    (datapool -> cumulus.asf.alaska.edu), and `requests` drops the bearer token on a host change,
+    so Earthdata answers 401. The same object sits in the products bucket and is reachable through
+    the host newer granules use; rebuild the URL from the granule's own s3 path (this rule
+    reproduces the real URL of every granule already hosted there)."""
+    if urlparse(url).netloc != LEGACY_HOST:
+        return url
+    name = url.rsplit("/", 1)[-1]
+    for s3 in s3_urls:
+        if s3.startswith(PRODUCTS_BUCKET) and s3.endswith("/" + name):
+            return CLOUD_PREFIX + s3[len("s3://"):].split("/", 1)[1]
+    return url
+
+
 def _scene(kind, f):
     p = f["properties"]
     base = {
@@ -81,7 +102,7 @@ def _scene(kind, f):
     for u in p.get("additionalUrls", []):
         tag = u.rsplit("_", 1)[-1].removesuffix(".tif")
         if u.endswith(".tif") and tag in ("VV", "VH", "HH", "HV", "mask"):
-            tifs[tag] = u
+            tifs[tag] = _cloud_url(u, p.get("s3Urls", []))
     if any(k != "mask" for k in tifs):
         return {**base, "burst_id": p.get("operaBurstID"), "tifs": tifs}
     return None
