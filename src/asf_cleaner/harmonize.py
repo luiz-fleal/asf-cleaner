@@ -1,4 +1,4 @@
-"""Common output schema so NISAR (L-band) and OPERA/Sentinel-1 (C-band) can be compared."""
+"""Common output schema shared by the NISAR (L-band) and OPERA/Sentinel-1 (C-band) modes."""
 import numpy as np
 import pandas as pd
 
@@ -25,7 +25,7 @@ def harmonize(df: pd.DataFrame) -> pd.DataFrame:
                             keep="last")
 
     # z-score within each independent series (same sensor/track/direction/pol/burst):
-    # makes trends comparable across bands without pretending absolute dB are.
+    # puts series with different absolute levels (tracks, polarizations) on one scale for plotting.
     g = df.groupby(GROUP)["backscatter_db_median"]
     std = g.transform("std")
     n = g.transform("count")

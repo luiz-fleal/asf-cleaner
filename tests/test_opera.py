@@ -3,7 +3,6 @@ import pandas as pd
 import rasterio
 from rasterio.transform import from_origin
 
-from asf_cleaner.compare import compare
 from asf_cleaner.harmonize import harmonize
 from asf_cleaner.opera import clean_point
 from asf_cleaner.search import search  # noqa: F401  (import check)
@@ -43,11 +42,7 @@ def _rows(sensor, pols, vals, track=1):
             for p in pols for i, v in enumerate(vals)]
 
 
-def test_harmonize_and_compare():
+def test_harmonize():
     n = harmonize(pd.DataFrame(_rows("NISAR", ["HH", "HV"], [-10, -9, -8, -9, -10])))
-    o = harmonize(pd.DataFrame(_rows("OPERA", ["VV", "VH"], [-15, -14, -13, -14, -15])))
-    assert set(n.pol_class) == {"co", "cross"} and set(n.band) == {"L"} and set(o.band) == {"C"}
+    assert set(n.pol_class) == {"co", "cross"} and set(n.band) == {"L"}
     assert abs(n.z_median[n.polarization == "HH"].mean()) < 1e-9
-    res = compare(n, o)
-    assert (res.n_pairs == 5).all() and np.allclose(res.z_correlation, 1)
-    assert np.allclose(res.mean_offset_db_nisar_minus_opera, 5)

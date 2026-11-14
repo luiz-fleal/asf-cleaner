@@ -21,7 +21,6 @@ dependencies = [
 
 [project.scripts]
 asf-clean = "asf_cleaner.cli:main"
-asf-compare = "asf_cleaner.compare:main"
 
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]

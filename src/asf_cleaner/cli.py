@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import nisar, opera
-from .config import DATE_RANGES, Settings, get_token
+from .config import Settings, get_token, resolve_dataset, resolve_range
 from .harmonize import harmonize
 from .search import search
 from .stream import open_remote_h5
@@ -45,23 +45,26 @@ ADAPTERS = {"NISAR": run_nisar, "OPERA": run_opera}
 def main(argv=None):
     d = Settings()
     ap = argparse.ArgumentParser(description="Stream & clean ASF NISAR / OPERA-S1 data at a point")
-    ap.add_argument("--dataset", default=d.dataset, choices=ADAPTERS)
+    ap.add_argument("--dataset", default=d.dataset, choices=["auto", *ADAPTERS],
+                    help="auto: NISAR if the range is inside NISAR coverage, else OPERA")
     ap.add_argument("--lon", type=float, default=d.lon)
     ap.add_argument("--lat", type=float, default=d.lat)
-    ap.add_argument("--start", help="default depends on dataset (see config.DATE_RANGES)")
-    ap.add_argument("--end")
-    ap.add_argument("--max-results", type=int, default=d.max_results)
+    ap.add_argument("--start", help="e.g. 2026-06-01 (default: 180 days before --end)")
+    ap.add_argument("--end", help="e.g. 2026-11-13 (default: now)")
+    ap.add_argument("--max-results", type=int, default=d.max_results,
+                    help="cap on total scenes; newest are kept and a warning is logged if exceeded")
     ap.add_argument("--window-m", type=float, default=d.window_m, help="ground footprint in meters")
     ap.add_argument("--out", default=d.out)
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    start, end = DATE_RANGES[a.dataset]
-    s = Settings(a.lon, a.lat, a.start or start, a.end or end, a.max_results, a.window_m,
-                 a.out, a.dataset)
-    rows = ADAPTERS[s.dataset](s, get_token())
+    start, end = resolve_range(a.start, a.end)
+    dataset, why = resolve_dataset(a.dataset, start, end)
+    log.info("mode: %s - %s", dataset, why)
+    s = Settings(a.lon, a.lat, start, end, a.max_results, a.window_m, a.out, dataset)
+    rows = ADAPTERS[dataset](s, get_token())
     if not rows:
-        log.warning("no data produced")
+        log.warning("no data produced (no scenes at this point/range, or all scenes failed)")
         return
     df = harmonize(pd.DataFrame(rows))
     out = Path(s.out)
