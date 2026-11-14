@@ -43,6 +43,8 @@ Longitude is negative west of Greenwich (`-47.9` is Brazil, `47.9` is Madagascar
 | `--dataset` | `auto` | `auto`, `NISAR` or `OPERA` |
 | `--max-results` | 1000 | Cap on the total number of scenes processed (see below) |
 | `--window-m` | 500 | Ground footprint in meters read around the point |
+| `--workers` | 8 | Scenes processed in parallel (`1` = sequential) |
+| `--no-cache` | off | Refetch everything and ignore the cache |
 | `--out` | `out` | Output folder |
 
 Defaults can also be edited in `src/asf_cleaner/config.py`.
@@ -71,6 +73,28 @@ are processed and a warning is logged:
 A truncated series biases any trend analysis, so don't ignore that warning. Each scene costs a
 few network requests, so raise the cap deliberately for very long ranges.
 
+## Speed: parallel scenes and the cache
+Fetching is network-bound (several small requests per scene), so scenes are processed in parallel
+and already-processed scenes are never fetched again.
+
+- **`--workers N`** (default 8). OPERA uses a thread pool (GDAL releases the GIL); NISAR uses
+  separate processes, because h5py holds a global lock while reading over the network and threads
+  would just queue behind it. The pool type per dataset is `EXECUTORS` in `config.py`. More workers
+  is not always faster and ASF may throttle (HTTP 429): stay at 16 or below. The log reports
+  scenes/second so you can compare `--workers 1` against higher values on your connection.
+- **Retries:** transient network errors are retried with backoff (HTTP 429/5xx at the connection
+  level, and up to 3 attempts per scene). Auth failures (bad token) and "point outside the scene"
+  are not retried. A scene that still fails is logged and skipped, not cached, and fetched again on
+  the next run.
+- **Cache:** processed scenes are stored in `<out>/.cache/<dataset>_<lon>_<lat>_w<window_m>.parquet`.
+  A re-run, or a run with an extended date range, only fetches the scenes it doesn't have. A fully
+  cached run needs no token and no downloads. The output file contains only the scenes of the
+  range you asked for, while the cache keeps everything ever processed, so a narrow run never
+  destroys earlier work. Rows are reused only if the point, `--window-m` and the cleaning logic
+  (`PROCESSING_VERSION` in `config.py`) are unchanged; cached rows from an older version are
+  refetched automatically. Use `--no-cache` to force a refetch, or delete `<out>/.cache`.
+- **Ctrl-C** cancels pending scenes and saves the ones already finished to the cache.
+
 ## Output
 `out/<dataset>_<lon>_<lat>.csv` and `.parquet`, one row per scene, burst and polarization.
 
@@ -85,6 +109,7 @@ few network requests, so raise the cap deliberately for very long ranges.
 | `backscatter_db_mean`, `_median`, `_center` | Backscatter in dB over the window, and the point pixel |
 | `window_m`, `window_px`, `pixel_spacing_m` | Footprint actually read |
 | `normalization` | Radiometric normalization (gamma0 for both; see caveats) |
+| `processing_version` | Version of the cleaning logic that produced the row (used by the cache) |
 
 ## Analysis (`asf-analyze`)
 Reads the Parquet (or CSV) output **lazily with Polars**, so only the series you select is loaded.

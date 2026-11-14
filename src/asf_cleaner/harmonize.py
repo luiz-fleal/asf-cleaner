@@ -8,7 +8,7 @@ COLUMNS = [
     "sensor", "band", "platform", "scene", "burst_id", "track", "direction", "start_time",
     "polarization", "pol_class", "valid_fraction", "backscatter_db_mean",
     "backscatter_db_median", "backscatter_db_center", "window_m", "window_px",
-    "pixel_spacing_m", "normalization",
+    "pixel_spacing_m", "normalization", "processing_version",
 ]
 
 

@@ -37,7 +37,7 @@ def _rows(sensor, pols, vals, track=1):
                  direction="A", start_time=f"2026-0{i+1}-01T00:00:00Z", polarization=p,
                  valid_fraction=1, backscatter_db_mean=v, backscatter_db_median=v,
                  backscatter_db_center=v, window_m=330, window_px="11x11",
-                 pixel_spacing_m=30, normalization="gamma0")
+                 pixel_spacing_m=30, normalization="gamma0", processing_version=2)
             for p in pols for i, v in enumerate(vals)]
 
 

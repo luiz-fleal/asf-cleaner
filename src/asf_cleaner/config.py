@@ -9,10 +9,18 @@ LAT = -15.8
 MAX_RESULTS = 1000  # cap on total scenes processed; a warning is logged if more exist
 WINDOW_M = 500  # ground footprint (meters) sampled around the point
 DEFAULT_LOOKBACK_DAYS = 180  # used when --start/--end are not given
+DEFAULT_WORKERS = 8  # scenes processed in parallel (1 = sequential); keep <= ~16 to avoid throttling
 # -----------------------------------------------------------------------------
 
 # First NISAR GCOV acquisition in the ASF archive (global; a given point may start later).
 NISAR_START = datetime(2025, 10, 1, tzinfo=timezone.utc)
+
+# Bump when the cleaning logic changes: cached rows from older versions are refetched.
+PROCESSING_VERSION = 2
+
+# Pool type per dataset. GDAL (OPERA GeoTIFFs) releases the GIL, so threads work; h5py (NISAR)
+# holds a global lock while reading over the network, so it needs separate processes.
+EXECUTORS = {"NISAR": "process", "OPERA": "thread"}
 
 ASF_SEARCH_URL = "https://api.daac.asf.alaska.edu/services/search/param"
 TIME_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -28,6 +36,8 @@ class Settings:
     window_m: float = WINDOW_M
     out: str = "out"
     dataset: str = "auto"
+    workers: int = DEFAULT_WORKERS
+    use_cache: bool = True
 
 
 def parse_time(s: str, end_of_day: bool = False) -> datetime:

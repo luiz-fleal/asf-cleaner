@@ -1,18 +1,45 @@
+import threading
 from contextlib import contextmanager
 
 import fsspec
 import h5py
 import rasterio
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+_local = threading.local()
+
+
+def get_session() -> requests.Session:
+    """One keep-alive session per thread/process, retrying 429/5xx with backoff.
+
+    Sessions keep requests' behaviour of dropping the Authorization header on cross-host
+    redirects, so the token is never forwarded to the CDN.
+    """
+    s = getattr(_local, "session", None)
+    if s is None:
+        s = requests.Session()
+        retry = Retry(
+            total=4,
+            connect=1,  # connection failures are retried by the outer runner.retry as well
+            read=1,
+            status=4,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET", "HEAD"}),
+            respect_retry_after_header=True,
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=32, pool_maxsize=32)
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        _local.session = s
+    return s
 
 
 def resolve_url(url: str, token: str) -> str:
-    """Follow ASF's redirect (Earthdata auth) to the signed CloudFront URL.
-
-    requests drops the Authorization header on cross-host redirects, so the
-    token is never forwarded to the CDN.
-    """
-    r = requests.get(
+    """Follow ASF's redirect (Earthdata auth) to the signed CloudFront URL."""
+    r = get_session().get(
         url,
         headers={"Authorization": f"Bearer {token}", "Range": "bytes=0-0"},
         stream=True,
