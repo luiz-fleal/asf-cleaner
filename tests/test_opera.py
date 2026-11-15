@@ -1,9 +1,13 @@
+import time
+
 import numpy as np
 import pandas as pd
+import pytest
 import rasterio
 from rasterio.transform import from_origin
 
 from asf_cleaner.harmonize import harmonize
+from asf_cleaner import opera
 from asf_cleaner.opera import clean_point
 
 
@@ -30,6 +34,31 @@ def test_opera_mask_and_db(tmp_path):
     assert vv_row["window_px"] == "3x3" and np.isclose(vv_row["valid_fraction"], 7 / 9)
     assert np.isclose(vv_row["backscatter_db_median"], -10)
     assert vv_row["normalization"] == "gamma0"
+
+
+def test_opera_files_are_read_at_the_same_time(tmp_path, monkeypatch):
+    """VV, VH and the mask are independent downloads: they must overlap, not queue."""
+    real = opera._read_window
+
+    def slow_read(*a):
+        time.sleep(0.3)
+        return real(*a)
+
+    monkeypatch.setattr(opera, "_read_window", slow_read)
+    arr = np.full((30, 30), 0.1, "float32")
+    for name in ("vv", "vh"):
+        write_tif(tmp_path / f"{name}.tif", arr, "float32")
+    write_tif(tmp_path / "m.tif", np.zeros((30, 30), "uint8"), "uint8")
+    t = time.perf_counter()
+    rows = clean_point({"VV": str(tmp_path / "vv.tif"), "VH": str(tmp_path / "vh.tif"),
+                        "mask": str(tmp_path / "m.tif")}, None, -47.9, -15.8, window_m=90)
+    assert len(rows) == 2 and time.perf_counter() - t < 0.8  # one after the other would be 0.9s+
+
+
+def test_opera_failed_file_raises_its_error(tmp_path):
+    write_tif(tmp_path / "vv.tif", np.full((30, 30), 0.1, "float32"), "float32")
+    with pytest.raises(ValueError, match="outside the burst"):  # the point is not inside this raster
+        clean_point({"VV": str(tmp_path / "vv.tif")}, None, 10.0, 10.0, window_m=90)
 
 
 def _rows(sensor, pols, vals, track=1):

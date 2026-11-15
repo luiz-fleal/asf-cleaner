@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 from functools import partial
@@ -91,6 +92,69 @@ def test_empty_items():
     assert runner.run_parallel(slow, [], workers=4, kind="thread") == []
 
 
+# ---- iter_parallel on the shared pools -----------------------------------------------------
+def getpid(_item):
+    return [os.getpid()]
+
+
+def test_process_pool_is_reused_between_requests():
+    """The API must not respawn processes (and re-import h5py/rasterio) for every request."""
+    first = {r.rows[0] for r in runner.iter_parallel(getpid, range(4), 2, "process", pool="reuse")}
+    second = {r.rows[0] for r in runner.iter_parallel(getpid, range(4), 2, "process", pool="reuse")}
+    assert os.getpid() not in first and first & second  # at least one worker survived into request 2
+    assert runner.shared_pool("process", "reuse") is runner.shared_pool("process", "reuse")
+
+
+def test_a_request_never_exceeds_its_own_workers():
+    live, peak, lock = 0, 0, threading.Lock()
+
+    def fn(x):
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        time.sleep(0.05)
+        with lock:
+            live -= 1
+        return [x]
+
+    res = list(runner.iter_parallel(fn, range(12), 3, "thread", pool="limit"))
+    assert sorted(r.rows[0] for r in res) == list(range(12)) and 1 < peak <= 3
+
+
+def test_pools_with_different_names_are_separate():
+    assert runner.shared_pool("thread", "rain") is not runner.shared_pool("thread", "default")
+
+
+def test_iter_parallel_survives_a_pool_that_was_shut_down():
+    runner.shared_pool("thread", "dead").shutdown()  # what a broken pool looks like to the next request
+    res = list(runner.iter_parallel(slow, range(4), 2, "thread", pool="dead"))
+    assert sorted(r.rows[0] for r in res) == [0, 1, 2, 3]
+
+
+def test_iter_parallel_cancel_stops_submitting():
+    cancel, started = threading.Event(), []
+
+    def fn(x):
+        started.append(x)
+        cancel.set()
+        time.sleep(0.1)
+        return [x]
+
+    list(runner.iter_parallel(fn, range(50), 2, "thread", cancel, pool="cancel"))
+    assert len(started) < 10  # the other ~48 scenes were never started
+
+
+def test_iter_parallel_isolates_failures():
+    def fn(x):
+        if x == 1:
+            raise ValueError("boom")
+        return [x]
+
+    res = list(runner.iter_parallel(fn, range(4), 2, "thread", pool="iso"))
+    assert [r.item for r in res if r.error] == [1] and len(res) == 4
+
+
 # ---- session -------------------------------------------------------------------------------
 def test_session_reused_with_retries():
     s = get_session()
@@ -116,6 +180,25 @@ def test_cache_roundtrip_and_merge(tmp_path):
     got = cache.load(p, 2)
     assert len(got) == 3 and set(got.scene) == {"a", "b"}
     assert not list(p.parent.glob("*.tmp"))
+
+
+def test_two_writers_do_not_overwrite_each_other(tmp_path):
+    """Two jobs load the cache, then both save: neither's rows may be lost."""
+    p = cache.cache_path(tmp_path, "OPERA", 1, 2, 500)
+    snapshot_a = cache.load(p, 2)  # both start from an empty cache
+    snapshot_b = cache.load(p, 2)
+    cache.save(p, snapshot_a, [row("a")])
+    cache.save(p, snapshot_b, [row("b")])  # b's snapshot knows nothing about a
+    assert set(cache.load(p, 2).scene) == {"a", "b"}
+    assert not list(p.parent.glob("*.tmp"))
+
+
+def test_save_keeps_the_newest_value_and_drops_old_versions(tmp_path):
+    p = cache.cache_path(tmp_path, "OPERA", 1, 2, 500)
+    cache.save(p, pd.DataFrame(), [row("a", version=1), row("keep")])  # a stale-version row on disk
+    cache.save(p, pd.DataFrame(), [{**row("keep"), "v": 9.0}])
+    got = cache.load(p, 2)
+    assert list(got.scene) == ["keep"] and got.v.iloc[0] == 9.0
 
 
 def test_cache_version_mismatch_ignored(tmp_path):

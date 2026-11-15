@@ -23,8 +23,8 @@ The same pipeline is available in two forms, so you can test locally and then pl
 | For | Local testing, scripts, notebooks, one-off analysis | Connecting to a **front-end** (web app, dashboard) |
 | You run | `uv run asf-clean --lon ... --lat ...` | `uv run asf-api`, then call it from the browser |
 | Output | CSV and Parquet files in `out/`, plus a plot | JSON, streamed live as each scene finishes (Server-Sent Events) |
-| Rain (IMERG) | Yes | Not yet (SAR backscatter only) |
-| Analysis (trend, events, plots) | Yes (`asf-analyze`) | No, done by the front-end |
+| Rain (IMERG) | Yes (`imerg_*` file and rain columns) | Yes, fetched **automatically** with every request (`rain` events) |
+| Analysis (trend, events, plots) | Yes (`asf-analyze`) | No, left to the front-end |
 | Shared | The same cleaning code and the **same cache**: a scene fetched by one is instant for the other | |
 
 > **Typical workflow:** try a point with the CLI first (`asf-clean`, then `asf-analyze`) to see what
@@ -83,7 +83,8 @@ Results land in `out/` (see [Output](#output)). Full options are in [CLI referen
     curl -N 'http://127.0.0.1:8000/series/stream?lon=-60.0217&lat=-3.119&start=2026-06-01'
 
 Rows stream back as each scene finishes, so a chart can be drawn while the series is still being
-built. Details, parameters and a JavaScript example are in [HTTP API](#http-api).
+built, and the IMERG rain for the same point and dates arrives in the same stream.
+Details, parameters and a JavaScript example are in [HTTP API](#http-api).
 
 ### Check the install
 
@@ -149,6 +150,13 @@ and already-processed scenes are never fetched again.
   would just queue behind it. The pool type per dataset is `EXECUTORS` in `config.py`. More workers
   is not always faster and ASF may throttle (HTTP 429): stay at 16 or below. The log reports
   scenes/second so you can compare `--workers 1` against higher values on your connection.
+  The API keeps its pools alive between requests (a process pool takes seconds to spawn, because
+  every worker imports h5py and rasterio) and starts two NISAR workers at launch. A request keeps at
+  most its own `workers` scenes in flight, so it cannot take the whole pool. Total concurrency is
+  capped by `ASF_DEFAULT_PROCESS_POOL` (NISAR, default 8), `ASF_DEFAULT_THREAD_POOL` (OPERA, default
+  32) and `ASF_RAIN_THREAD_POOL` (IMERG rain, default 12; separate, so rain never delays scenes).
+  Within one OPERA scene the VV, VH and mask files are read at the same time
+  (`ASF_FILE_THREADS`, default 48).
 - **Retries:** transient network errors are retried with backoff (HTTP 429/5xx at the connection
   level, and up to 3 attempts per scene). Auth failures (bad token) and "point outside the scene"
   are not retried. A scene that still fails is logged and skipped, not cached, and fetched again on
@@ -159,7 +167,13 @@ and already-processed scenes are never fetched again.
   range you asked for, while the cache keeps everything ever processed, so a narrow run never
   destroys earlier work. Rows are reused only if the point, `--window-m` and the cleaning logic
   (`PROCESSING_VERSION` in `config.py`) are unchanged; cached rows from an older version are
-  refetched automatically. Use `--no-cache` to force a refetch, or delete `<out>/.cache`.
+  refetched automatically. Use `--no-cache` to force a refetch, or delete `<out>/.cache`. Several
+  jobs (for example two API requests, or the front-end's two streams) can write the same cache at
+  once: a save merges with what is already on disk instead of overwriting it. **The API rounds the
+  requested point to 4 decimals (about 11 m, under one pixel) before doing anything**, so clicks on
+  the same spot share one cache file; `meta.lon`/`meta.lat` report the point actually processed.
+  `ASF_SNAP_DECIMALS` changes this (3 hits more often but can shift the sampled window by up to
+  ~55 m). The CLI always uses exactly the point you give it.
 - **Ctrl-C** cancels pending scenes and saves the ones already finished to the cache.
 
 ## Output
@@ -267,8 +281,8 @@ instantly from the shared cache.
 | Endpoint | Returns |
 |---|---|
 | `GET /health` | `{status, tokenConfigured, maxJobs}`: use it to check the server and its token |
-| `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `done` (or `fatal`) |
-| `GET /series` | The same data as one JSON document, once every scene is done |
+| `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `rain` (IMERG days), `rain_error`, `sceneRain`, and finally `done` (or `fatal`) |
+| `GET /series` | The same data as one JSON document, once everything is done (adds `rain`, `sceneRain`, `rainError`) |
 
 Query parameters (both series endpoints):
 
@@ -281,6 +295,7 @@ Query parameters (both series endpoints):
 | `max_results` | 400 | Cap on scenes, up to 1000 |
 | `workers` | 8 | Parallel scenes, 1 to 16 |
 | `cache` | `true` | `false` ignores the cache |
+| `rain` | `true` | Fetch IMERG daily rain automatically alongside the SAR data. `false` skips it |
 
     curl -N 'http://127.0.0.1:8000/series/stream?lon=-60.0217&lat=-3.119&start=2026-06-01'
 
@@ -292,15 +307,36 @@ A stream looks like this (illustrative values, shortened):
     event: rows
     data: {"source":"live","done":1,"total":9,"rows":[{"scene":"NISAR_L2_...","t":1782856800000,"pol":"HH","db":-10.2,...}]}
 
+    event: rain
+    data: {"source":"cache","done":120,"total":210,"rows":[{"t":1780185600000,"mm":3.4,"run":"late"},...]}
+
     event: scene_error
     data: {"scene":"NISAR_L2_...","message":"ValueError: point falls outside the product grid","done":2}
 
+    event: sceneRain
+    data: {"rows":[{"scene":"NISAR_L2_...","rain0":0.0,"rain1d":12.5,"rain3d":30.1,"rain7d":41.0,"rain30d":96.2},...]}
+
     event: done
-    data: {"fetched":8,"failed":1,"seconds":84.3}
+    data: {"fetched":8,"failed":1,"seconds":84.3,"rainDays":210,"rainFailed":0}
 
 Each `rows` event holds `rows: [{scene, sensor, band, platform, t (epoch ms), burst, track, direction,
 pol, polClass, db (median dB), dbMean, dbCenter, valid}]`, plus `source` (`cache` or `live`), `done`
 and `total`. A `fatal` event (`{message}`) means the whole job failed.
+
+**Rain (IMERG).** Rain is requested automatically for the same point and dates (from 30 days
+before `start`, so early scenes have a full history) and runs **at the same time** as the SAR
+scenes. It is cached like the SAR data, so repeats are instant.
+- `rain` events carry `rows: [{t, mm, run}]`: `t` is the start of the UTC day in epoch ms, `mm` the
+  daily rain (`null` if missing) and `run` is `final` or `late` (see [Rain: IMERG](#rain-imerg-imerg_lon_lat)).
+  Days arrive in batches (the cached days first), so sort by `t`. `done`/`total` count days.
+- `sceneRain` (one event, near the end) ties rain to each scene: `rain0` is the acquisition's own UTC
+  day, `rain1d`/`rain3d`/`rain7d`/`rain30d` the totals of the N days before it, in mm (`null` if a
+  day is missing). Match it to `rows` by `scene`.
+- **Rain never breaks the SAR stream.** If IMERG fails (for example the one-time GES DISC
+  authorization is missing) a `rain_error` event `{message}` is sent and the SAR rows carry on.
+- **Order:** `meta` is always first, events from the SAR scenes and the rain are interleaved as they
+  happen, and `done` is always last, after the rain has finished, so a client that closes on `done`
+  has everything. Existing clients that ignore the new events keep working unchanged.
 
 From a browser front-end:
 
@@ -312,6 +348,10 @@ es.addEventListener("meta", (e) => console.log("scenes:", JSON.parse(e.data).tot
 es.addEventListener("rows", (e) => {
   points.push(...JSON.parse(e.data).rows);      // update the chart here as rows arrive
 });
+const rain = [];                                  // daily IMERG rain: [{t, mm, run}, ...]
+es.addEventListener("rain", (e) => rain.push(...JSON.parse(e.data).rows));
+es.addEventListener("rain_error", (e) => console.warn("no rain:", JSON.parse(e.data).message));
+es.addEventListener("sceneRain", (e) => console.log("rain before each scene:", JSON.parse(e.data).rows));
 es.addEventListener("scene_error", (e) => console.warn(JSON.parse(e.data)));
 es.addEventListener("done", () => es.close()); // close, or EventSource will reconnect
 es.addEventListener("fatal", (e) => { console.error(JSON.parse(e.data).message); es.close(); });
@@ -326,11 +366,12 @@ Notes:
   browser. Set `ASF_API_CORS` to your front-end's origin(s) for anything else.
 - **Environment:** `EARTHDATA_TOKEN` (required), `ASF_CACHE_DIR` (cache folder, default `out`),
   `ASF_API_CORS` (comma-separated allowed origins), `ASF_API_MAX_JOBS` (concurrent requests,
-  default 4).
+  default 4), `ASF_SNAP_DECIMALS` (point rounding, default 4), `ASF_WARM_PROCESSES` (NISAR workers
+  started at launch, default 2, 0 = on first use), and the pool sizes listed under *Speed*.
 - **Speed:** timing is network-bound. A NISAR scene takes about a minute and a half, an OPERA scene
   a few seconds, so the first request for a new point is slow and repeats are instant.
-- **Scope:** the API serves the SAR backscatter only. IMERG rain and the analysis are CLI features
-  for now.
+- **Scope:** the API returns the SAR backscatter and the IMERG rain. The analysis (trend, events,
+  outliers, plots) is a CLI feature (`asf-analyze`) for now.
 
 ## Caveats
 - **Masks differ by dataset.** OPERA: shadow/layover/invalid pixels are removed (mask 0 = valid).

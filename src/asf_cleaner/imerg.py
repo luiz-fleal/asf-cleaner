@@ -19,7 +19,7 @@ import requests
 
 from . import cache
 from .config import IMERG_COLLECTIONS, IMERG_LOOKBACK_DAYS, PROCESSING_VERSION
-from .runner import retry, run_parallel
+from .runner import iter_parallel, retry
 from .stream import get_session
 
 log = logging.getLogger("asf_cleaner")
@@ -140,52 +140,97 @@ def fetch_point(item: dict, *, i: int, j: int, token: str) -> list[dict]:
 
 # ---- the daily series (cached) ---------------------------------------------------------------
 def cache_path(out, lon, lat):
+    """Cache file of the 0.1-degree IMERG cell containing the point. IMERG has one value per cell, so
+    every point inside it shares the same file (and the same fetched days)."""
     from pathlib import Path
-    return Path(out) / ".cache" / f"imerg_{lon}_{lat}.parquet"
+    i, j = grid_index(lon, lat)
+    return Path(out) / ".cache" / f"imerg_cell{i}_{j}.parquet"
+
+
+def iter_daily(lon, lat, start: datetime, end: datetime, *, token_fn, workers=8, out="out",
+               use_cache=True, cancel=None, stats: dict | None = None):
+    """Yield (source, rows, done, total) for the daily rain of [start - lookback, end].
+
+    Cached days come first in one chunk ("cache"), then each fetched day as it arrives ("live"), so
+    a caller can stream them. Days fetched are cached even if the caller stops early. `stats`
+    (optional dict) receives `total` and `failed`. Raises ImergAccessError if the token is rejected.
+    """
+    stats = stats if stats is not None else {}
+    d0, d1 = start.date() - timedelta(days=IMERG_LOOKBACK_DAYS), end.date()
+    i, j = grid_index(lon, lat)
+    path = cache_path(out, lon, lat)
+    cached = cache.load(path, PROCESSING_VERSION) if use_cache else pd.DataFrame()
+    have = dict(zip(cached["date"], cached["imerg_run"])) if len(cached) else {}
+    every = [d0 + timedelta(days=k) for k in range((d1 - d0).days + 1)]
+    # A day cached from the Final run is settled for good. Everything else (not cached, or cached from
+    # Late, which Final may have replaced) has to be looked up in CMR. When nothing is left to look
+    # up, which is the usual repeat request, CMR is not called at all.
+    settled = {d for d in every if have.get(d.isoformat()) == "final"}
+    need = [d for d in every if d not in settled]
+    planned, missing = plan_days(need[0], d1) if need else ([], [])
+    planned = [p for p in planned if p["date"] not in settled]
+    missing = [d for d in missing if d not in settled]
+    if missing:
+        log.info("IMERG: no granule for %d day(s), e.g. %s (not published yet)", len(missing), missing[-1])
+
+    # refetch a day cached from the Late run once the Final run is available for it
+    todo = [d for d in planned if d["date"].isoformat() not in have
+            or (d["run"] == "final" and have[d["date"].isoformat()] == "late")]
+    total = len(settled) + len(planned)
+    stats.update(total=total, failed=0)
+    log.info("IMERG: %d days (%s .. %s): %d cached, %d to fetch, cell %.2f, %.2f",
+             total, d0, d1, total - len(todo), len(todo), LON0 + i * STEP, LAT0 + j * STEP)
+
+    ready = []
+    if len(cached):
+        refetch = {d["date"].isoformat() for d in todo}
+        in_range = cached[(cached["date"] >= d0.isoformat()) & (cached["date"] <= d1.isoformat())
+                          & ~cached["date"].isin(refetch)]
+        ready = in_range.to_dict("records")
+    done = len(ready)
+    if ready:
+        yield "cache", ready, done, total
+
+    new_rows = []
+    try:
+        if todo:
+            from functools import partial
+            fn = partial(fetch_point, i=i, j=j, token=token_fn())
+            try:  # fail fast on a rejected token instead of failing every day
+                first = fn(todo[0])
+                new_rows += first
+                done += len(first)
+                todo = todo[1:]
+                yield "live", first, done, total
+            except PermissionError as e:
+                raise ImergAccessError(str(e)) from e
+            except Exception as e:
+                log.warning("IMERG first request failed (%s); trying the rest", e)
+            for res in iter_parallel(fn, todo, workers, "thread", cancel, pool="rain"):
+                if res.rows:
+                    new_rows += res.rows
+                    done += len(res.rows)
+                    yield "live", res.rows, done, total
+                else:
+                    stats["failed"] += 1
+                    log.warning("IMERG %s skipped: %s", res.item["date"], res.error)
+    finally:
+        if use_cache and new_rows:  # also when the caller stops early
+            cache.save(path, cached, new_rows, key=["date"])
+    if stats["failed"]:
+        log.warning("IMERG: %d days failed and are not cached; rerun to retry them", stats["failed"])
 
 
 def fetch_daily(lon, lat, start: datetime, end: datetime, *, token_fn, workers=8, out="out",
                 use_cache=True) -> pd.DataFrame | None:
-    """Daily rain for [start - lookback, end]. Raises ImergAccessError if the token is rejected."""
-    d0, d1 = start.date() - timedelta(days=IMERG_LOOKBACK_DAYS), end.date()
-    i, j = grid_index(lon, lat)
-    days, missing = plan_days(d0, d1)
-    if missing:
-        log.info("IMERG: no granule for %d day(s), e.g. %s (not published yet)", len(missing), missing[-1])
-
-    path = cache_path(out, lon, lat)
-    cached = cache.load(path, PROCESSING_VERSION) if use_cache else pd.DataFrame()
-    have = dict(zip(cached["date"], cached["imerg_run"])) if len(cached) else {}
-    # refetch a day cached from the Late run once the Final run is available for it
-    todo = [d for d in days if d["date"].isoformat() not in have
-            or (d["run"] == "final" and have[d["date"].isoformat()] == "late")]
-    log.info("IMERG: %d days (%s .. %s): %d cached, %d to fetch, cell %.2f, %.2f",
-             len(days), d0, d1, len(days) - len(todo), len(todo), LON0 + i * STEP, LAT0 + j * STEP)
-
-    new_rows = []
-    if todo:
-        from functools import partial
-        fn = partial(fetch_point, i=i, j=j, token=token_fn())
-        try:  # fail fast on a rejected token instead of failing every day
-            new_rows += fn(todo[0])
-            todo = todo[1:]
-        except PermissionError as e:
-            raise ImergAccessError(str(e)) from e
-        except Exception as e:
-            log.warning("IMERG first request failed (%s); trying the rest", e)
-        results = run_parallel(fn, todo, workers, "thread", label=lambda d: f"IMERG {d['date']}")
-        new_rows += [r for res in results if res.rows for r in res.rows]
-        failed = sum(1 for res in results if res.error)
-        if failed:
-            log.warning("IMERG: %d days failed and are not cached; rerun to retry them", failed)
-        if use_cache and new_rows:
-            cache.save(path, cached, new_rows, key=["date"])
-
-    parts = [d for d in (cached, pd.DataFrame(new_rows)) if len(d)]
-    if not parts:
+    """Daily rain for [start - lookback, end] as one table. Raises ImergAccessError if the token is rejected."""
+    rows = []
+    for _source, chunk, _done, _total in iter_daily(lon, lat, start, end, token_fn=token_fn,
+                                                    workers=workers, out=out, use_cache=use_cache):
+        rows += chunk
+    if not rows:
         return None
-    df = pd.concat(parts, ignore_index=True).drop_duplicates("date", keep="last")
-    df = df[(df["date"] >= d0.isoformat()) & (df["date"] <= d1.isoformat())]
+    df = pd.DataFrame(rows).drop_duplicates("date", keep="last")
     return df.sort_values("date").reset_index(drop=True)
 
 

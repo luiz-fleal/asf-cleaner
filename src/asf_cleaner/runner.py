@@ -1,9 +1,17 @@
 """Run per-scene work in parallel (threads or spawned processes) with isolation and retries."""
 import logging
 import multiprocessing
+import os
 import threading
 import time
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    BrokenExecutor,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from dataclasses import dataclass
 
 import requests
@@ -91,10 +99,81 @@ def run_parallel(fn, items, workers: int, kind: str, label=str) -> list[Result]:
     return results
 
 
-def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | None = None):
+# ---- shared, long-lived pools (used by the API) -------------------------------------------------
+# Spawning a process pool costs seconds (every worker re-imports numpy, h5py, rasterio...), so the
+# API keeps one pool per (name, kind) for its whole lifetime instead of creating one per request.
+# The pool size is the global cap on concurrent scene jobs; each request still limits itself to its
+# own `workers` by keeping only that many scenes in flight.
+_pools: dict[tuple[str, str], object] = {}
+_pools_lock = threading.Lock()
+_POOL_DEFAULTS = {("default", "process"): 8, ("default", "thread"): 32, ("rain", "thread"): 12}
+
+
+def pool_size(name: str, kind: str) -> int:
+    """Worker count of a shared pool; override with ASF_<NAME>_<KIND>_POOL, e.g. ASF_DEFAULT_PROCESS_POOL."""
+    default = _POOL_DEFAULTS.get((name, kind), 8)
+    return max(1, int(os.environ.get(f"ASF_{name.upper()}_{kind.upper()}_POOL", default)))
+
+
+def _worker_init():
+    """Runs once in every pool process: import the heavy modules before the first scene arrives."""
+    from . import workers  # noqa: F401
+
+
+def shared_pool(kind: str, name: str = "default"):
+    """The long-lived executor for (name, kind), created on first use."""
+    key = (name, kind)
+    with _pools_lock:
+        pool = _pools.get(key)
+        if pool is None:
+            size = pool_size(name, kind)
+            if kind == "process":
+                pool = ProcessPoolExecutor(max_workers=size, mp_context=multiprocessing.get_context("spawn"),
+                                           initializer=_worker_init)
+            else:
+                pool = ThreadPoolExecutor(max_workers=size, thread_name_prefix=f"asf-{name}")
+            _pools[key] = pool
+        return pool
+
+
+def _discard_pool(name: str, kind: str, pool) -> None:
+    """Drop a broken pool (only if it is still the registered one) so the next call builds a new one."""
+    with _pools_lock:
+        if _pools.get((name, kind)) is pool:
+            del _pools[(name, kind)]
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _noop():
+    return None
+
+
+def warm(kind: str = "process", name: str = "default", n: int | None = None) -> None:
+    """Start `n` pool workers now, so the first request does not wait for them to spawn and import."""
+    ex = shared_pool(kind, name)
+    for _ in range(min(n if n is not None else pool_size(name, kind), pool_size(name, kind))):
+        ex.submit(_noop)
+
+
+def _submit(name: str, kind: str, fn, item):
+    """Submit one item to the shared pool, rebuilding the pool once if it turns out to be broken."""
+    for attempt in (0, 1):
+        ex = shared_pool(kind, name)
+        try:
+            return ex.submit(_timed, fn, item), ex
+        except RuntimeError:  # BrokenProcessPool, or a pool that was shut down
+            _discard_pool(name, kind, ex)
+            if attempt:
+                raise
+
+
+def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | None = None,
+                  pool: str = "default"):
     """Like run_parallel, but yields each Result as soon as it finishes (for streaming clients).
 
-    Setting `cancel` (or closing the generator) stops waiting and cancels scenes not yet started.
+    Runs on the shared pool `pool` (see shared_pool) and keeps at most `workers` items in flight, so
+    one request cannot occupy the whole pool. Setting `cancel` (or closing the generator) stops
+    waiting and cancels scenes not yet started; scenes already running finish in the background.
     """
     items = list(items)
     n = len(items)
@@ -109,22 +188,33 @@ def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | 
             yield Result(it, rows, err, secs)
         return
 
-    if kind == "process":
-        pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
-    else:
-        pool = ThreadPoolExecutor(max_workers=workers)
-    futures = {pool.submit(_timed, fn, it): it for it in items}
-    pending = set(futures)
+    queue_ = iter(items)
+    pending: dict = {}  # future -> (item, pool it was submitted to)
+
+    def submit_next() -> None:
+        it = next(queue_, None)
+        if it is not None:
+            fut, ex = _submit(pool, kind, fn, it)
+            pending[fut] = (it, ex)
+
     try:
+        for _ in range(workers):
+            submit_next()
         while pending:
             if cancel is not None and cancel.is_set():
                 break
             # short timeout so a cancel is noticed within half a second, not when a scene ends
-            finished, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            finished, _ = wait(set(pending), timeout=0.5, return_when=FIRST_COMPLETED)
             for f in finished:
+                it, ex = pending.pop(f)
+                submit_next()  # refill the window before handing the result to a possibly slow consumer
                 try:
-                    yield Result(futures[f], *f.result())
-                except Exception as e:  # pool-level failure (e.g. a worker process died)
-                    yield Result(futures[f], None, f"{type(e).__name__}: {e}", 0.0)
+                    yield Result(it, *f.result())
+                except BrokenExecutor as e:  # a worker process died: the next scenes get a fresh pool
+                    _discard_pool(pool, kind, ex)
+                    yield Result(it, None, f"{type(e).__name__}: {e}", 0.0)
+                except Exception as e:  # pool-level failure
+                    yield Result(it, None, f"{type(e).__name__}: {e}", 0.0)
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        for f in pending:
+            f.cancel()

@@ -108,9 +108,10 @@ START, END = datetime(2026, 2, 1, tzinfo=UTC), datetime(2026, 2, 10, tzinfo=UTC)
 
 @pytest.fixture
 def daily(monkeypatch, tmp_path):
-    calls = {"fetched": [], "run": "late", "fail": set(), "deny": False}
+    calls = {"fetched": [], "run": "late", "fail": set(), "deny": False, "plans": [], "tmp": tmp_path}
 
     def plan(d0, d1):
+        calls["plans"].append((d0, d1))
         return [{"date": d0 + timedelta(days=k), "run": calls["run"], "granule": "g", "url": "u"}
                 for k in range((d1 - d0).days + 1)], []
 
@@ -185,3 +186,41 @@ def test_rain_features_missing_day_gives_nan():
                              "precipitation_mm_day": [1.0, 2.0, 4.0, 5.0]})
     out = imerg.rain_features(pd.DataFrame({"start_time": pd.to_datetime(["2026-01-05T08:00:00Z"], utc=True)}), daily_df)
     assert np.isnan(out.rain_3d_mm[0]) and out.rain_1d_mm[0] == 4.0 and out.rain_d0_mm[0] == 5.0
+
+
+# ---- cache key and CMR lookups -------------------------------------------------------------
+def test_cache_is_shared_by_every_point_in_a_cell(tmp_path):
+    a = imerg.cache_path(tmp_path, -60.021, -1.7405)
+    b = imerg.cache_path(tmp_path, -60.049, -1.7499)  # same 0.1 degree cell, different point
+    c = imerg.cache_path(tmp_path, -60.2, -1.74)
+    assert a == b and a != c
+
+
+def test_nearby_point_reuses_the_cached_days(daily):
+    daily["run_it"]()
+    daily["fetched"].clear()
+    df = imerg.fetch_daily(-60.049, -1.7499, START, END, token_fn=lambda: "t", workers=1,
+                           out=str(daily["tmp"]))
+    assert len(df) == 40 and daily["fetched"] == []
+
+
+def test_fully_final_cache_never_calls_cmr(daily, monkeypatch):
+    daily["run"] = "final"
+    daily["run_it"]()
+    daily["plans"].clear()
+    daily["fetched"].clear()
+    assert len(daily["run_it"]()) == 40
+    assert daily["plans"] == [] and daily["fetched"] == []
+
+
+def test_cmr_only_looks_up_days_that_are_not_settled(daily):
+    daily["run"] = "final"
+    daily["run_it"]()
+    daily["plans"].clear()
+    daily["fetched"].clear()
+    later = END + timedelta(days=3)
+    df = imerg.fetch_daily(-60.025, -1.74118, START, later, token_fn=lambda: "t", workers=1,
+                           out=str(daily["tmp"]))
+    assert len(df) == 43
+    assert daily["plans"] == [(date(2026, 2, 11), date(2026, 2, 13))]  # just the new days
+    assert daily["fetched"] == [date(2026, 2, 11), date(2026, 2, 12), date(2026, 2, 13)]

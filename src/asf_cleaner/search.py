@@ -46,9 +46,11 @@ def _features(kind, lon, lat, t0, t1, limit) -> list:
     return _get(kind, lon, lat, t0, t1, "geojson", limit).json().get("features", [])
 
 
-def _collect(kind, lon, lat, t0, t1, need) -> list:
-    """Up to `need` features in [t0, t1], newest first."""
-    n = _count(kind, lon, lat, t0, t1)
+def _collect(kind, lon, lat, t0, t1, need, n=None) -> list:
+    """Up to `need` features in [t0, t1], newest first. Pass `n` (the count of [t0, t1]) when the
+    caller already has it, to save one request."""
+    if n is None:
+        n = _count(kind, lon, lat, t0, t1)
     if n == 0:
         return []
     if n <= PAGE_SIZE or (t1 - t0) <= MIN_SPAN:
@@ -118,7 +120,7 @@ def search(kind, lon, lat, start: datetime, end: datetime, max_results=1000):
             max_results, total, max_results,
         )
     seen, scenes = set(), []
-    for f in _collect(kind, lon, lat, start, end, max_results):
+    for f in _collect(kind, lon, lat, start, end, max_results, n=total):
         s = _scene(kind, f)
         if s and s["scene"] not in seen:
             seen.add(s["scene"])

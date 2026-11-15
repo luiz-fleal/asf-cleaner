@@ -5,6 +5,7 @@ reused. Keeping the cache separate means a narrow-range run never destroys earli
 """
 import logging
 import os
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -32,12 +33,20 @@ def load(path: Path, version: int) -> pd.DataFrame:
 
 
 def save(path: Path, old: pd.DataFrame, new_rows: list[dict], key: list[str] = KEY) -> None:
-    """Merge new rows into the cache atomically (temp file + rename)."""
-    parts = [d for d in (old, pd.DataFrame(new_rows)) if len(d)]
+    """Merge new rows into the cache atomically (temp file + rename).
+
+    The file is read again here and merged, because another job (a second API request, or the
+    front-end's two streams) may have written to it since `old` was loaded; writing only `old` plus
+    the new rows would silently drop what it added.
+    """
+    from .config import PROCESSING_VERSION
+
+    current = load(path, PROCESSING_VERSION)  # what is on disk right now (older versions dropped)
+    parts = [d for d in (old, current, pd.DataFrame(new_rows)) if len(d)]  # later parts win
     if not parts:
         return
     df = pd.concat(parts, ignore_index=True).drop_duplicates(key, keep="last")
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")  # unique per writer
     df.to_parquet(tmp, index=False)
     os.replace(tmp, path)

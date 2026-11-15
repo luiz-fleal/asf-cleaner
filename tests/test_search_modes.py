@@ -108,3 +108,14 @@ def test_search_returns_cloud_urls_for_legacy_granules(monkeypatch):
     monkeypatch.setattr(S, "_features", lambda *a: [feat])
     sc = S.search("OPERA", 0, 0, t, t + timedelta(days=1))[0]
     assert sc["tifs"] == {x: f"{CLOUD}_{x}.tif" for x in ("VH", "VV", "mask")}
+
+
+def test_search_counts_once_when_one_page_is_enough(monkeypatch):
+    """The total is already known from the warning check; asking ASF for it again wastes a request."""
+    times = series(20)
+    fake_asf(monkeypatch, times, page=50)  # one page is enough: no bisecting
+    counts = []
+    real = S._count
+    monkeypatch.setattr(S, "_count", lambda *a: counts.append(a) or real(*a))
+    out = S.search("NISAR", 0, 0, times[0] - timedelta(days=1), times[-1], max_results=50)
+    assert len(out) == 20 and len(counts) == 1
