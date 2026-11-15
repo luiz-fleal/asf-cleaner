@@ -11,3 +11,6 @@ wheels/
 
 out/
 *.png
+
+# Secrets: the Earthdata token
+.env
