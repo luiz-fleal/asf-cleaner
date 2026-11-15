@@ -159,19 +159,31 @@ def events(lon, lat, start_s, end_s, dataset_req, window_m, max_results, workers
                    "dataset": dataset, "assessment": assessment}
 
 
+class Turn(BaseModel):
+    role: str
+    text: str = Field(max_length=assistant.MAX_QUESTION)
+
+
 class AskBody(BaseModel):
     question: str = Field(max_length=assistant.MAX_QUESTION)
     lang: str = "en"
-    context: dict | None = None
+    context: str | None = Field(default=None, max_length=assistant.MAX_CONTEXT)
+    history: list[Turn] = Field(default_factory=list, max_length=12)
+
+
+_ask_limit = assistant.RateLimit(int(os.environ.get("ASF_ASSISTANT_PER_MINUTE", "20")))
 
 
 @app.post("/assistant")
-def ask_assistant(body: AskBody):
-    """Open questions from the map's AI bar. Commands never come here; the page handles those itself."""
+def ask_assistant(body: AskBody, request: Request):
+    """Questions and commands from the map's AI bar, answered by a small Bedrock model that may call `control_map`."""
     if not assistant.configured():
-        return {"configured": False, "answer": None}
+        return {"configured": False, "answer": None, "actions": []}
+    if not _ask_limit.allow(request.client.host if request.client else "local"):
+        raise HTTPException(status_code=429, detail="Too many questions in a minute. Wait a little.")
     try:
-        return {"configured": True, "answer": assistant.ask(body.question, body.lang, body.context)}
+        out = assistant.ask(body.question, body.lang, body.context, [t.model_dump() for t in body.history])
+        return {"configured": True, **out}
     except Exception as exc:  # network, quota, bad key: the page shows a calm message, not a stack trace
         log.warning("assistant failed: %s", exc)
         raise HTTPException(status_code=502, detail="The assistant could not answer now.")

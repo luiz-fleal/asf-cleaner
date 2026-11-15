@@ -90,7 +90,11 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 ENV_FILES = (Path(".env"), PROJECT_DIR / ".env")
 
 
-def _token_from_env_files() -> str | None:
+def env_value(name: str) -> str | None:
+    """A setting from the environment, else from a `.env` file (read on every call, so a value added while the
+    server runs is picked up without a restart)."""
+    if os.environ.get(name):
+        return os.environ[name]
     for path in ENV_FILES:
         try:
             lines = path.read_text().splitlines()
@@ -98,11 +102,15 @@ def _token_from_env_files() -> str | None:
             continue
         for line in lines:
             line = line.strip().removeprefix("export ").strip()
-            if line.startswith("EARTHDATA_TOKEN="):
+            if line.startswith(name + "="):
                 value = line.split("=", 1)[1].strip().strip("'\"")
                 if value:
                     return value
     return None
+
+
+def _token_from_env_files() -> str | None:
+    return env_value("EARTHDATA_TOKEN")
 
 
 def get_token() -> str:
