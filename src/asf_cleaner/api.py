@@ -26,15 +26,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import assistant, cache, history, imerg, optical, regions
+from . import assistant, cache, history, imerg, notices, optical, regions
 from . import forecast as fc
 from . import risk
 from .memo import TTLCache
 from .sse import stream_response
-from .config import EXECUTORS, PROCESSING_VERSION, get_token, resolve_dataset, resolve_range
+from .config import EXECUTORS, PROCESSING_VERSION, get_token, parse_time, resolve_dataset, resolve_range
 from .harmonize import harmonize
 from .runner import iter_parallel
-from .search import search
+from .search import Scenes, search
 from .workers import process_nisar, process_opera
 
 log = logging.getLogger("asf_cleaner")
@@ -68,10 +68,11 @@ def cached_search(dataset, lon, lat, start, end, max_results):
     ttl = 3600 if end < pd.Timestamp.now(tz="UTC").to_pydatetime() - timedelta(days=2) else 300
     hit = _search_cache.get(key, ttl)
     if hit is not None:
-        return list(hit)
+        return Scenes(hit, hit.total)  # a copy, that still knows how many scenes ASF had in all
     scenes = search(dataset, lon, lat, start, end, max_results)
+    scenes = scenes if isinstance(scenes, Scenes) else Scenes(scenes)
     _search_cache.put(key, scenes)
-    return list(scenes)
+    return Scenes(scenes, scenes.total)
 
 
 def _num(v):
@@ -102,7 +103,11 @@ def rows_to_json(df: pd.DataFrame) -> list[dict]:
 
 
 def events(lon, lat, start_s, end_s, dataset_req, window_m, max_results, workers, use_cache, cancel):
-    """Yield (event, payload) pairs: meta, rows (cache first, then one per scene), scene_error, done."""
+    """Yield (event, payload) pairs: meta, notice, rows (cache first, then one per scene), scene_error, notice, done.
+
+    `notice` events carry what a person should know (which sensor was chosen and why, too little data, scenes
+    that failed); `done` carries the verdict on whether the period gave enough data to trust an analysis.
+    """
     t0 = time.perf_counter()
     start, end = resolve_range(start_s, end_s)
     if end - start > MAX_RANGE:
@@ -119,10 +124,14 @@ def events(lon, lat, start_s, end_s, dataset_req, window_m, max_results, workers
         "dataset": dataset, "reason": why, "lon": lon, "lat": lat, "windowM": window_m,
         "start": start.isoformat(), "end": end.isoformat(),
         "total": len(scenes), "cached": len(have), "toFetch": len(todo),
+        "matches": getattr(scenes, "total", len(scenes)),
     }
+    read = [sc["start_time"] for sc in scenes if sc["scene"] in have]  # start times of the scenes that were read
     if have:
         yield "rows", {"source": "cache", "done": len(have), "total": len(scenes),
                        "rows": rows_to_json(harmonize(cached[cached["scene"].isin(have)]))}
+    for n in notices.dataset_notices(dataset_req, dataset, start, end):
+        yield "notice", n
 
     new_rows, done, failed = [], len(have), 0
     try:
@@ -135,12 +144,19 @@ def events(lon, lat, start_s, end_s, dataset_req, window_m, max_results, workers
                     yield "scene_error", {"scene": res.item["scene"], "message": res.error, "done": done}
                     continue
                 new_rows.extend(res.rows)
+                read.append(res.item["start_time"])
                 yield "rows", {"source": "live", "done": done, "total": len(scenes),
                                "rows": rows_to_json(harmonize(pd.DataFrame(res.rows)))}
     finally:
         if use_cache and new_rows:  # also on cancel, so partial progress is not lost
             cache.save(cache_file, cached, new_rows)
-    yield "done", {"fetched": done - len(have) - failed, "failed": failed, "seconds": round(time.perf_counter() - t0, 1)}
+    assessment, notes = notices.assess_series(
+        dataset, start, end, [parse_time(t) for t in read], failed=failed, total=len(scenes),
+        truncated_to=max_results, matches=getattr(scenes, "total", None))
+    for n in notes:
+        yield "notice", n
+    yield "done", {"fetched": done - len(have) - failed, "failed": failed, "seconds": round(time.perf_counter() - t0, 1),
+                   "dataset": dataset, "assessment": assessment}
 
 
 class AskBody(BaseModel):
@@ -228,6 +244,8 @@ def rain_events(lon, lat, start_s, end_s, workers, use_cache, cancel):
     yield "meta", {"lon": lon, "lat": lat, "gridLon": round(imerg.LON0 + i * imerg.STEP, 2),
                    "gridLat": round(imerg.LAT0 + j * imerg.STEP, 2), "start": d0.isoformat(), "end": d1.isoformat(),
                    "total": len(days), "cached": n_cached, "toFetch": len(todo), "missing": len(missing)}
+    for n in notices.rain_notices(missing, 0, 0):
+        yield "notice", n
     if n_cached:
         hit = cached[cached["date"].isin(wanted - {d["date"].isoformat() for d in todo})]
         yield "rows", {"source": "cache", "done": n_cached, "total": len(days),
@@ -261,7 +279,9 @@ def rain_events(lon, lat, start_s, end_s, workers, use_cache, cancel):
     finally:
         if use_cache and new_rows:
             cache.save(path, cached, new_rows, key=["date"])
-    yield "done", {"fetched": len(new_rows), "failed": failed, "seconds": round(time.perf_counter() - t0, 1)}
+    for n in notices.rain_notices([], failed, len(todo)):
+        yield "notice", n
+    yield "done", {"fetched": len(new_rows), "failed": failed, "days": n_cached + len(new_rows), "seconds": round(time.perf_counter() - t0, 1)}
 
 
 @app.get("/rain/stream")
@@ -363,7 +383,7 @@ def forecast_events(lon, lat, until, rain_scale, workers, use_cache, cancel, win
     try:
         result = fc.run_forecast(radar, rain_series, until, rain_scale)
     except fc.InsufficientHistory as err:
-        yield "fatal", {"message": f"Not enough history to forecast: {err}"}
+        yield "fatal", {"message": f"Not enough history to forecast: {err}", "code": "insufficient-history", "level": notices.WARNING}
         return
     result["notes"] = notes + result["notes"]
     try:  # risks are an extra: a failure here must never cost the forecast
@@ -483,7 +503,7 @@ def series(
         raise HTTPException(400, str(err)) from err
     if not _jobs.acquire(blocking=False):
         raise HTTPException(503, "server is busy with other requests; try again shortly")
-    meta, rows, errors, done = {}, [], [], {}
+    meta, rows, errors, notes, done = {}, [], [], [], {}
     try:
         for ev, data in events(lon, lat, start, end, dataset, window_m, max_results, workers, cache_enabled, threading.Event()):
             if ev == "meta":
@@ -492,13 +512,15 @@ def series(
                 rows.extend(data["rows"])
             elif ev == "scene_error":
                 errors.append(data)
+            elif ev == "notice":
+                notes.append(data)
             elif ev == "done":
                 done = data
     except (RuntimeError, ValueError) as err:
         raise HTTPException(502, str(err)) from err
     finally:
         _jobs.release()
-    return {"meta": meta, "rows": rows, "errors": errors, **done}
+    return {"meta": meta, "rows": rows, "errors": errors, "notices": notes, **done}
 
 
 def main(argv=None):

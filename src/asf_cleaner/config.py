@@ -2,6 +2,7 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 # ---- USER-SETTABLE DEFAULTS -------------------------------------------------
 LON = -47.9
@@ -14,6 +15,8 @@ DEFAULT_WORKERS = 8  # scenes processed in parallel (1 = sequential); keep <= ~1
 
 # First NISAR GCOV acquisition in the ASF archive (global; a given point may start later).
 NISAR_START = datetime(2025, 10, 1, tzinfo=timezone.utc)
+# First OPERA RTC-S1 acquisition we use (Sentinel-1 data in the OPERA archive starts in 2016).
+OPERA_START = datetime(2016, 1, 1, tzinfo=timezone.utc)
 
 # Bump when the cleaning logic changes: cached rows from older versions are refetched.
 PROCESSING_VERSION = 2
@@ -81,18 +84,34 @@ def resolve_dataset(requested: str, start: datetime, end: datetime) -> tuple[str
     return "OPERA", f"range starts before NISAR coverage ({NISAR_START:%Y-%m-%d}); using the historical series"
 
 
-def get_token() -> str:
-    token = os.environ.get("EARTHDATA_TOKEN")
-    if not token:
-        try:  # optional .env file in the current directory
-            for line in open(".env"):
-                if line.startswith("EARTHDATA_TOKEN="):
-                    token = line.split("=", 1)[1].strip().strip("'\"")
+# Where the token may live besides the environment: a .env file in the folder the server was started from, or in the
+# project folder, so it is found wherever `asf-api` is launched from.
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+ENV_FILES = (Path(".env"), PROJECT_DIR / ".env")
+
+
+def _token_from_env_files() -> str | None:
+    for path in ENV_FILES:
+        try:
+            lines = path.read_text().splitlines()
         except OSError:
-            pass
+            continue
+        for line in lines:
+            line = line.strip().removeprefix("export ").strip()
+            if line.startswith("EARTHDATA_TOKEN="):
+                value = line.split("=", 1)[1].strip().strip("'\"")
+                if value:
+                    return value
+    return None
+
+
+def get_token() -> str:
+    """The Earthdata token: the EARTHDATA_TOKEN variable, else a `.env` file (read on every call, so a token added
+    while the server runs is picked up without a restart)."""
+    token = os.environ.get("EARTHDATA_TOKEN") or _token_from_env_files()
     if not token:
         raise RuntimeError(
-            "EARTHDATA_TOKEN not set. Generate a token at "
-            "https://urs.earthdata.nasa.gov (Generate Token) and export it."
+            "EARTHDATA_TOKEN not set. Generate a token at https://urs.earthdata.nasa.gov (Generate Token) and put it "
+            f"in {PROJECT_DIR / '.env'} as EARTHDATA_TOKEN=..., or export it."
         )
     return token

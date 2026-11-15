@@ -2,6 +2,7 @@
 import json
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from asf_cleaner import api
@@ -29,6 +30,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "WORKERS", {"OPERA": fake_worker, "NISAR": fake_worker})
     monkeypatch.setattr(api, "get_token", lambda: "tok")
     monkeypatch.setattr(api, "CACHE_DIR", str(tmp_path))
+    api._search_cache.clear()  # searches are remembered between requests, and tests fake the search differently
     return TestClient(api.app)
 
 
@@ -86,9 +88,71 @@ def test_failed_scene_does_not_break_the_stream(client, monkeypatch):
     assert ev[-1][1]["failed"] == 1 and ev[-1][1]["fetched"] == 2
 
 
+def notes_of(ev):
+    return {d["code"]: d for e, d in ev if e == "notice"}
+
+
+def test_stream_tells_the_sensor_chosen_and_judges_the_data(client):
+    ev = parse(client.get(URL).text)
+    notes = notes_of(ev)
+    assert "dataset-opera" in notes and "nisar-partial" not in notes  # 2018..2024: OPERA, chosen from the period alone
+    assert "few-scenes" in notes  # 3 scenes: usable, not steady
+    done = ev[-1][1]
+    assert done["dataset"] == "OPERA" and done["assessment"]["confidence"] == "limited" and done["assessment"]["scenes"] == 3
+    names = [e for e, _ in ev]
+    assert names[0] == "meta" and names[-1] == "done" and "notice" in names
+    assert max(i for i, n in enumerate(names) if n == "notice") < len(names) - 1  # every notice comes before `done`
+
+
+def test_period_without_scenes_is_reported_as_insufficient(client, monkeypatch):
+    monkeypatch.setattr(api, "search", lambda *a, **k: [])
+    ev = parse(client.get(URL).text)
+    assert "no-scenes" in notes_of(ev) and ev[-1][1]["assessment"]["confidence"] == "insufficient"
+    assert ev[-1][0] == "done" and ev[-1][1]["fetched"] == 0
+
+
+def test_failed_scenes_and_a_cut_short_period_are_reported(client, monkeypatch):
+    def flaky(sc, **k):
+        if sc["scene"] == "S2":
+            raise ValueError("point falls outside the scene")
+        return fake_worker(sc, **k)
+
+    def many(*a, **k):
+        return api.Scenes(SCENES, 90)  # ASF has 90 matches, only 3 were kept
+
+    monkeypatch.setattr(api, "WORKERS", {"OPERA": flaky, "NISAR": flaky})
+    monkeypatch.setattr(api, "search", many)
+    ev = parse(client.get(URL + "&cache=false&max_results=3").text)
+    notes = notes_of(ev)
+    assert notes["scenes-failed"]["vars"] == {"failed": 1, "total": 3}
+    assert notes["truncated"]["vars"] == {"matches": 90, "kept": 3}
+    assert ev[0][0] == "meta" and ev[0][1]["matches"] == 90
+
+
+def test_a_failure_before_the_stream_starts_is_put_in_words(client, monkeypatch):
+    def down(*a, **k):
+        raise requests.ConnectionError("ASF is down")
+
+    monkeypatch.setattr(api, "search", down)
+    ev = parse(client.get(URL).text)
+    last = ev[-1]
+    assert last[0] == "fatal" and last[1]["code"] == "archive-unreachable" and "ASF is down" in last[1]["detail"]
+    assert "ConnectionError" not in last[1]["message"]
+
+
+def test_missing_token_is_a_clear_fatal(client, monkeypatch):
+    def no_token():
+        raise RuntimeError("EARTHDATA_TOKEN not set. Generate a token ...")
+
+    monkeypatch.setattr(api, "get_token", no_token)
+    ev = parse(client.get(URL + "&cache=false").text)
+    assert ev[-1][0] == "fatal" and ev[-1][1]["code"] == "token-missing"
+
+
 def test_blocking_endpoint_matches_the_stream(client):
     j = client.get("/series?lon=-60.0217&lat=-3.119&start=2018-01-01&end=2024-12-31&workers=2").json()
     assert j["meta"]["total"] == 3 and len(j["rows"]) == 6 and j["failed"] == 0
+    assert any(n["code"] == "dataset-opera" for n in j["notices"]) and j["assessment"]["scenes"] == 3
 
 
 # ---- rain (IMERG) ------------------------------------------------------------------------
@@ -129,6 +193,23 @@ def test_rain_streams_days_and_caches_per_cell(tmp_path, monkeypatch):
     ev2 = parse(client.get(RAIN.replace("-60.0217", "-60.03")).text)
     assert ev2[0][1]["cached"] == 8 and ev2[0][1]["toFetch"] == 0 and len(calls) == 8
     assert [e for e, _ in ev2] == ["meta", "rows", "done"]
+
+
+def test_rain_reports_days_it_could_not_read_and_days_not_published(tmp_path, monkeypatch):
+    client, _ = rain_client(tmp_path, monkeypatch)
+    real = api.imerg.fetch_point
+
+    def flaky(item, **k):
+        if item["date"].day == 3:
+            raise ValueError("granule missing")
+        return real(item, **k)
+
+    monkeypatch.setattr(api.imerg, "fetch_point", flaky)
+    monkeypatch.setattr(api.imerg, "plan_days", lambda d0, d1: ([{"date": date(2026, 1, d), "run": "late", "granule": f"g{d}", "url": "u"} for d in range(1, 9)], [date(2026, 1, 9)]))
+    ev = parse(client.get(RAIN.replace("end=2026-01-08", "end=2026-01-09")).text)
+    notes = notes_of(ev)
+    assert notes["rain-missing"]["vars"]["n"] == 1 and notes["rain-failed"]["vars"]["n"] == 1
+    assert ev[-1][0] == "done" and ev[-1][1]["failed"] == 1 and ev[-1][1]["days"] == 7
 
 
 def test_rain_json_matches_stream(tmp_path, monkeypatch):
@@ -216,6 +297,7 @@ def test_forecast_without_history_is_a_clear_error(client, monkeypatch):
     monkeypatch.setattr(api.history, "rain_history", lambda *a, **k: iter([("data", pd.Series(dtype=float))]))
     ev = parse(client.get(FORECAST + "&cache=false").text)
     assert ev[-1][0] == "fatal" and "Not enough history" in ev[-1][1]["message"]
+    assert ev[-1][1]["code"] == "insufficient-history"
 
 
 def test_forecast_window_is_snapped_and_part_of_the_cache_key(client, monkeypatch):

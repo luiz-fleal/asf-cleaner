@@ -203,9 +203,9 @@ Server-Sent Events while the scenes finish, so a client can draw the series as i
 | Endpoint | Returns |
 |---|---|
 | `GET /health` | `{status, tokenConfigured, maxJobs}` |
-| `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `done` (or `fatal`) |
+| `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `notice`, `done` (or `fatal`). With `dataset=auto` (the default) the backend picks the sensor from the period alone |
 | `GET /series` | The same data as one JSON document, once every scene is done |
-| `GET /rain/stream` | SSE: `meta`, `rows` (`{date, t, mm, run}`, cache first, then batches, newest day first), `done` (or `fatal`). NASA GPM IMERG daily rain at the point's 0.1 degree cell |
+| `GET /rain/stream` | SSE: `meta`, `rows` (`{date, t, mm, run}`, cache first, then batches, newest day first), `notice`, `done` (or `fatal`). NASA GPM IMERG daily rain at the point's 0.1 degree cell |
 | `GET /rain` | The same rain data as one JSON document |
 | `GET /forecast/stream` | SSE: `meta`, `progress` (`{phase, done, total}` while the history is collected), `result`, `done` (or `fatal`). Monthly radar backscatter and rain forecast to 2030 |
 | `GET /forecast` | The same forecast as one JSON document |
@@ -223,12 +223,34 @@ pol, polClass, db (median dB), dbMean, dbCenter, valid}]`, plus `source` (`cache
 and `total`. Closing the connection cancels the scenes not yet started. Scenes already processed
 are served from the same cache as the CLI (`ASF_CACHE_DIR`, default `out`).
 
+### Notices: what a person should be told
+What used to reach only stdout (a period cut short, scenes that failed, too little data, a failure) is also sent
+to the client as `notice` events, so a page can show it. A notice is
+`{level: info | warning | error, code, message, vars}`; `message` is an English template with `{name}`
+placeholders and `vars` fills them, so a client can translate the template and keep the numbers (`notices.render`
+does the English version). In `/series/stream` they cover:
+
+* the sensor that was chosen and why (`dataset-nisar`, `dataset-opera`), and what the period leaves out
+  (`nisar-partial`: NISAR days inside a period that uses OPERA; `before-opera`, `before-nisar`, `future-end`);
+* scenes that could not be read (`scenes-failed`) and a period with more scenes than `max_results` (`truncated`);
+* whether the period gave **enough time to trust an analysis**: `no-scenes`, `too-few-scenes`, `few-scenes`,
+  `partial-coverage`, `gaps`, `short-period`. The verdict is in `done.assessment`:
+  `{confidence: high | limited | insufficient, scenes, failed, periodDays, coverage, longestGapDays}`.
+  The bars (`notices.py`): under 3 scenes is *insufficient*; under 10 scenes, scenes covering under half of the
+  period, a stretch of more than 45 days without scenes, a cut-short period or more than a quarter of the scenes
+  failing make it *limited*. The 10 scenes and the 45 days are the same bars `asf-analyze` uses.
+
+`/rain/stream` sends `rain-missing` (days NASA has not published) and `rain-failed`. A `fatal` event carries
+`{message, code, level, vars, detail}`: `message` is in plain words (`token-missing`, `auth-failed`,
+`archive-unreachable`, `archive-error`, ...) and `detail` is the technical text. `/series` returns the notices in
+`notices`. `done` of `/series/stream` also says which `dataset` was used.
+
 Environment: `ASF_CACHE_DIR` (cache folder), `ASF_API_CORS` (comma-separated allowed origins,
 default the Vite dev server), `ASF_API_MAX_JOBS` (concurrent requests, default 4; more get HTTP 503).
 Rain (`/rain`, `/rain/stream`) takes `lon`, `lat` (60S to 60N), `start`, `end`, `workers`, `cache`; it needs the one-time
 GES DISC authorization described above. Rain is cached per 0.1 degree grid cell (`imerg_cell_<i>_<j>`), so every
-point inside the same cell shares it. Clients are expected to ask for short date ranges (for example 30-day chunks
-around the date being looked at) instead of whole histories.
+point inside the same cell shares it. A range is limited to 12 years; a long one holds many scenes, so ask for what
+the analysis needs (the `truncated` notice says when `max_results` cut a period short).
 
 Speed: ASF searches and CMR granule lists are remembered for a few minutes (an hour for ranges that ended days ago),
 and NISAR scenes run in one long-lived process pool (`ASF_API_PROC_WORKERS`, default 3) so requests do not pay for

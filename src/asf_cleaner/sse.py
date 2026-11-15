@@ -9,6 +9,8 @@ from collections.abc import Callable, Iterable
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
+from .notices import describe_error
+
 log = logging.getLogger("asf_cleaner")
 
 
@@ -33,7 +35,8 @@ def stream_response(request: Request, make_events: Callable[[threading.Event], I
                 q.put(ev)
         except Exception as err:  # noqa: BLE001 - reported to the client as a fatal event
             log.exception("stream job failed")
-            q.put(("fatal", {"message": f"{type(err).__name__}: {err}"}))
+            n = describe_error(err)  # in words a person can act on; the technical text stays in `detail`
+            q.put(("fatal", {"message": n["message"], "code": n["code"], "level": n["level"], "vars": n["vars"], "detail": n["detail"]}))
         finally:
             q.put(None)
             release()

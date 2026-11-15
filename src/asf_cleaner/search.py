@@ -17,6 +17,17 @@ log = logging.getLogger("asf_cleaner")
 PAGE_SIZE = 1000
 MIN_SPAN = timedelta(days=1)
 
+class Scenes(list):
+    """The scenes `search` kept, newest first. `total` is every match ASF reported, which is more than
+    `len(self)` when the range held more scenes than the caller asked for."""
+
+    total: int = 0
+
+    def __init__(self, items=(), total: int | None = None):
+        super().__init__(items)
+        self.total = len(self) if total is None else total
+
+
 DATASETS = {
     "NISAR": {"dataset": "NISAR", "processingLevel": "GCOV"},
     "OPERA": {"dataset": "OPERA-S1", "processingLevel": "RTC"},
@@ -123,4 +134,4 @@ def search(kind, lon, lat, start: datetime, end: datetime, max_results=1000):
         if s and s["scene"] not in seen:
             seen.add(s["scene"])
             scenes.append(s)
-    return scenes
+    return Scenes(scenes, total)

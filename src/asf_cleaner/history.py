@@ -20,12 +20,12 @@ from pathlib import Path
 import pandas as pd
 
 from . import cache, imerg
-from .config import EXECUTORS, PROCESSING_VERSION, get_token
+from .config import EXECUTORS, OPERA_START, PROCESSING_VERSION, get_token
 from .harmonize import harmonize
 from .runner import iter_parallel
 from .workers import process_opera
 
-RADAR_START = datetime(2016, 1, 1, tzinfo=timezone.utc)
+RADAR_START = OPERA_START
 MONTHLY_LAST = date(2025, 9, 30)  # the final monthly product ends here
 FRESH_DAYS = 4  # a month is only used once it ended this many days ago
 MIN_DAY_COVERAGE = 0.9
@@ -93,7 +93,6 @@ def rain_history(lon, lat, *, cache_dir, workers=8, use_cache=True, today: date 
     """Monthly rain (mm) at the point's IMERG cell since 2016."""
     today = today or date.today()
     i, j = imerg.grid_index(lon, lat)
-    token = get_token()
     first = pd.Period(RADAR_START.strftime("%Y-%m"), freq="M")
     last_full = pd.Period(today - timedelta(days=FRESH_DAYS), freq="M") - 1  # month that ended at least FRESH_DAYS ago
 
@@ -110,7 +109,7 @@ def rain_history(lon, lat, *, cache_dir, workers=8, use_cache=True, today: date 
     yield "progress", {"phase": "rain-monthly", "done": done, "total": len(granules)}
     try:
         if todo:
-            fn = partial(imerg.fetch_monthly_point, i=i, j=j, token=token)
+            fn = partial(imerg.fetch_monthly_point, i=i, j=j, token=get_token())  # the token is only needed when something is not cached
             try:
                 first_rows = fn(todo[0])
             except PermissionError as err:
@@ -145,7 +144,7 @@ def rain_history(lon, lat, *, cache_dir, workers=8, use_cache=True, today: date 
         yield "progress", {"phase": "rain-daily", "done": done, "total": total}
         try:
             if dtodo:
-                fn = partial(imerg.fetch_point, i=i, j=j, token=token)
+                fn = partial(imerg.fetch_point, i=i, j=j, token=get_token())
                 for res in iter_parallel(fn, dtodo, workers, "thread", cancel):
                     done += 1
                     if not res.error:

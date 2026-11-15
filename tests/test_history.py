@@ -128,6 +128,19 @@ def test_rain_history_joins_monthly_product_and_daily_sums(tmp_path, monkeypatch
     assert not any(d.month == 3 and d.year == 2026 for d in day_calls)
 
 
+def test_rain_history_from_the_cache_needs_no_token(tmp_path, monkeypatch):
+    fake_imerg(monkeypatch)
+    kw = dict(cache_dir=str(tmp_path), today=date(2026, 3, 20), workers=4)
+    first = list(history.rain_history(-60.0, -3.0, **kw))[-1][1]
+
+    def no_token():
+        raise RuntimeError("EARTHDATA_TOKEN not set")
+
+    monkeypatch.setattr(history, "get_token", no_token)
+    again = list(history.rain_history(-60.0, -3.0, **kw))[-1][1]  # everything is cached: nothing to authenticate
+    assert again.equals(first)
+
+
 def test_rain_history_caches_both_sources(tmp_path, monkeypatch):
     monthly_calls, day_calls = fake_imerg(monkeypatch)
     kw = dict(cache_dir=str(tmp_path), today=date(2026, 3, 20), workers=4)
