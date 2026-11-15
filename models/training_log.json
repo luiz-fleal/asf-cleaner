@@ -1,0 +1,957 @@
+{
+ "summary": {
+  "protocol": "16 rounds; per round: test = 25% of the places of each class, in years after 2022; settings chosen by cross-validation grouped by place on the other places",
+  "rounds": 16,
+  "features": "fusion",
+  "family": "logistic",
+  "radarFeatures": "rich",
+  "radarAccuracy": 0.7356,
+  "radarTestAccuracy": 0.7266,
+  "byFeatureSet": {
+   "base": {
+    "testAccuracy": 0.7203,
+    "testPlaceAccuracy": 0.7356
+   },
+   "fusion": {
+    "testAccuracy": 0.8498,
+    "testPlaceAccuracy": 0.851
+   },
+   "rich": {
+    "testAccuracy": 0.7266,
+    "testPlaceAccuracy": 0.7356
+   }
+  },
+  "testAccuracy": {
+   "mean": 0.8498,
+   "std": 0.0856,
+   "min": 0.6579,
+   "max": 1.0
+  },
+  "testPlaceAccuracy": {
+   "mean": 0.851,
+   "std": 0.088
+  },
+  "testBalancedAccuracy": 0.8524,
+  "baselineAccuracy": {
+   "mean": 0.5396,
+   "std": 0.104
+  },
+  "roundsBeatingBaseline": 15,
+  "places": 51,
+  "samples": 337,
+  "classes": [
+   "forest",
+   "urban",
+   "vegetation",
+   "water"
+  ],
+  "accepted": true,
+  "accuracy": 0.851
+ },
+ "rounds": [
+  {
+   "seed": 0,
+   "features": "base",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 5,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.8898,
+   "testAccuracy": 0.5897,
+   "testBalancedAccuracy": 0.5347,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.4615,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 15.1
+  },
+  {
+   "seed": 0,
+   "features": "rich",
+   "family": "random_forest",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 5,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.8669,
+   "testAccuracy": 0.6154,
+   "testBalancedAccuracy": 0.5556,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.4615,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 15.1
+  },
+  {
+   "seed": 0,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.9023,
+   "testAccuracy": 0.7949,
+   "testBalancedAccuracy": 0.8125,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.4615,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 14.4
+  },
+  {
+   "seed": 1,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 3
+   },
+   "cvBalancedAccuracy": 0.7628,
+   "testAccuracy": 0.5405,
+   "testBalancedAccuracy": 0.5208,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.4324,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 14.3
+  },
+  {
+   "seed": 1,
+   "features": "rich",
+   "family": "gradient_boosting",
+   "params": {
+    "m__max_iter": 100,
+    "m__max_depth": 2,
+    "m__learning_rate": 0.1,
+    "m__l2_regularization": 1.0
+   },
+   "cvBalancedAccuracy": 0.7912,
+   "testAccuracy": 0.6216,
+   "testBalancedAccuracy": 0.5685,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.4324,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 15.0
+  },
+  {
+   "seed": 1,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.8949,
+   "testAccuracy": 0.8378,
+   "testBalancedAccuracy": 0.8125,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.4324,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 14.5
+  },
+  {
+   "seed": 2,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 30
+   },
+   "cvBalancedAccuracy": 0.792,
+   "testAccuracy": 0.8,
+   "testBalancedAccuracy": 0.8364,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.3429,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 35,
+   "seconds": 12.5
+  },
+  {
+   "seed": 2,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 30
+   },
+   "cvBalancedAccuracy": 0.7986,
+   "testAccuracy": 0.6571,
+   "testBalancedAccuracy": 0.6881,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.3429,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 35,
+   "seconds": 12.8
+  },
+  {
+   "seed": 2,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.8852,
+   "testAccuracy": 0.9429,
+   "testBalancedAccuracy": 0.9545,
+   "testPlaceAccuracy": 0.9231,
+   "baselineAccuracy": 0.3429,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 35,
+   "seconds": 24.4
+  },
+  {
+   "seed": 3,
+   "features": "base",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 5,
+    "m__max_features": 0.5
+   },
+   "cvBalancedAccuracy": 0.7811,
+   "testAccuracy": 0.7778,
+   "testBalancedAccuracy": 0.8109,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 34.6
+  },
+  {
+   "seed": 3,
+   "features": "rich",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 5,
+    "m__max_features": 0.5
+   },
+   "cvBalancedAccuracy": 0.7811,
+   "testAccuracy": 0.8056,
+   "testBalancedAccuracy": 0.8359,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 18.7
+  },
+  {
+   "seed": 3,
+   "features": "fusion",
+   "family": "svm",
+   "params": {
+    "m__gamma": "scale",
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.867,
+   "testAccuracy": 0.8333,
+   "testBalancedAccuracy": 0.8636,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 16.9
+  },
+  {
+   "seed": 4,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.7457,
+   "testAccuracy": 0.6944,
+   "testBalancedAccuracy": 0.75,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 36,
+   "seconds": 15.8
+  },
+  {
+   "seed": 4,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.7593,
+   "testAccuracy": 0.7222,
+   "testBalancedAccuracy": 0.7727,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 36,
+   "seconds": 16.2
+  },
+  {
+   "seed": 4,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.8378,
+   "testAccuracy": 0.8611,
+   "testBalancedAccuracy": 0.8864,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5833,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 36,
+   "seconds": 16.7
+  },
+  {
+   "seed": 5,
+   "features": "base",
+   "family": "random_forest",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 5,
+    "m__max_features": 0.5
+   },
+   "cvBalancedAccuracy": 0.736,
+   "testAccuracy": 0.8108,
+   "testBalancedAccuracy": 0.8056,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.5135,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 37,
+   "seconds": 15.4
+  },
+  {
+   "seed": 5,
+   "features": "rich",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 150,
+    "m__min_samples_leaf": 1,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.7303,
+   "testAccuracy": 0.7838,
+   "testBalancedAccuracy": 0.7597,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5135,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 37,
+   "seconds": 15.6
+  },
+  {
+   "seed": 5,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.7914,
+   "testAccuracy": 1.0,
+   "testBalancedAccuracy": 1.0,
+   "testPlaceAccuracy": 1.0,
+   "baselineAccuracy": 0.5135,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 37,
+   "seconds": 16.0
+  },
+  {
+   "seed": 6,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.6839,
+   "testAccuracy": 0.8788,
+   "testBalancedAccuracy": 0.9167,
+   "testPlaceAccuracy": 0.9231,
+   "baselineAccuracy": 0.6364,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 33,
+   "seconds": 12.3
+  },
+  {
+   "seed": 6,
+   "features": "rich",
+   "family": "random_forest",
+   "params": {
+    "m__n_estimators": 150,
+    "m__min_samples_leaf": 3,
+    "m__max_features": null
+   },
+   "cvBalancedAccuracy": 0.6891,
+   "testAccuracy": 0.9091,
+   "testBalancedAccuracy": 0.9375,
+   "testPlaceAccuracy": 0.9231,
+   "baselineAccuracy": 0.6364,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 33,
+   "seconds": 12.3
+  },
+  {
+   "seed": 6,
+   "features": "fusion",
+   "family": "gradient_boosting",
+   "params": {
+    "m__max_iter": 200,
+    "m__max_depth": 4,
+    "m__learning_rate": 0.1,
+    "m__l2_regularization": 5.0
+   },
+   "cvBalancedAccuracy": 0.8972,
+   "testAccuracy": 0.7273,
+   "testBalancedAccuracy": 0.7351,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.6364,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 147,
+   "testRows": 33,
+   "seconds": 11.5
+  },
+  {
+   "seed": 7,
+   "features": "base",
+   "family": "random_forest",
+   "params": {
+    "m__n_estimators": 150,
+    "m__min_samples_leaf": 5,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.7993,
+   "testAccuracy": 0.6667,
+   "testBalancedAccuracy": 0.6597,
+   "testPlaceAccuracy": 0.5385,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 39,
+   "seconds": 13.6
+  },
+  {
+   "seed": 7,
+   "features": "rich",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 150,
+    "m__min_samples_leaf": 5,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.8123,
+   "testAccuracy": 0.7179,
+   "testBalancedAccuracy": 0.6944,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 39,
+   "seconds": 14.6
+  },
+  {
+   "seed": 7,
+   "features": "fusion",
+   "family": "svm",
+   "params": {
+    "m__gamma": 0.1,
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.8646,
+   "testAccuracy": 0.7692,
+   "testBalancedAccuracy": 0.7917,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 39,
+   "seconds": 13.9
+  },
+  {
+   "seed": 8,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.8179,
+   "testAccuracy": 0.6667,
+   "testBalancedAccuracy": 0.7208,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.8333,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 13.0
+  },
+  {
+   "seed": 8,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.8095,
+   "testAccuracy": 0.6389,
+   "testBalancedAccuracy": 0.7,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.8333,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 14.1
+  },
+  {
+   "seed": 8,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.8764,
+   "testAccuracy": 0.8056,
+   "testBalancedAccuracy": 0.8333,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.8333,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 36,
+   "seconds": 14.2
+  },
+  {
+   "seed": 9,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.6848,
+   "testAccuracy": 0.7838,
+   "testBalancedAccuracy": 0.8277,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.5676,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 15.7
+  },
+  {
+   "seed": 9,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 3
+   },
+   "cvBalancedAccuracy": 0.6953,
+   "testAccuracy": 0.7568,
+   "testBalancedAccuracy": 0.7999,
+   "testPlaceAccuracy": 0.7692,
+   "baselineAccuracy": 0.5676,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 16.7
+  },
+  {
+   "seed": 9,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.7392,
+   "testAccuracy": 0.8919,
+   "testBalancedAccuracy": 0.911,
+   "testPlaceAccuracy": 0.9231,
+   "baselineAccuracy": 0.5676,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 37,
+   "seconds": 17.1
+  },
+  {
+   "seed": 10,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.8481,
+   "testAccuracy": 0.6842,
+   "testBalancedAccuracy": 0.6042,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.4474,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 38,
+   "seconds": 17.2
+  },
+  {
+   "seed": 10,
+   "features": "rich",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 300,
+    "m__min_samples_leaf": 3,
+    "m__max_features": "sqrt"
+   },
+   "cvBalancedAccuracy": 0.8668,
+   "testAccuracy": 0.6579,
+   "testBalancedAccuracy": 0.5833,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.4474,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 38,
+   "seconds": 17.9
+  },
+  {
+   "seed": 10,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.8812,
+   "testAccuracy": 0.8684,
+   "testBalancedAccuracy": 0.875,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.4474,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 145,
+   "testRows": 38,
+   "seconds": 17.1
+  },
+  {
+   "seed": 11,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 1
+   },
+   "cvBalancedAccuracy": 0.7728,
+   "testAccuracy": 0.641,
+   "testBalancedAccuracy": 0.6458,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 15.4
+  },
+  {
+   "seed": 11,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.7785,
+   "testAccuracy": 0.6667,
+   "testBalancedAccuracy": 0.6667,
+   "testPlaceAccuracy": 0.6154,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 15.9
+  },
+  {
+   "seed": 11,
+   "features": "fusion",
+   "family": "gradient_boosting",
+   "params": {
+    "m__max_iter": 100,
+    "m__max_depth": 4,
+    "m__learning_rate": 0.03,
+    "m__l2_regularization": 1.0
+   },
+   "cvBalancedAccuracy": 0.8073,
+   "testAccuracy": 0.8718,
+   "testBalancedAccuracy": 0.8333,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 16.3
+  },
+  {
+   "seed": 12,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.7344,
+   "testAccuracy": 0.7895,
+   "testBalancedAccuracy": 0.8277,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.6053,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 38,
+   "seconds": 13.9
+  },
+  {
+   "seed": 12,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 3
+   },
+   "cvBalancedAccuracy": 0.7689,
+   "testAccuracy": 0.8421,
+   "testBalancedAccuracy": 0.8693,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.6053,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 38,
+   "seconds": 14.3
+  },
+  {
+   "seed": 12,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.1
+   },
+   "cvBalancedAccuracy": 0.8678,
+   "testAccuracy": 0.9737,
+   "testBalancedAccuracy": 0.9773,
+   "testPlaceAccuracy": 1.0,
+   "baselineAccuracy": 0.6053,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 38,
+   "seconds": 14.6
+  },
+  {
+   "seed": 13,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.7914,
+   "testAccuracy": 0.6667,
+   "testBalancedAccuracy": 0.6597,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 16.0
+  },
+  {
+   "seed": 13,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.8096,
+   "testAccuracy": 0.641,
+   "testBalancedAccuracy": 0.6389,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 16.9
+  },
+  {
+   "seed": 13,
+   "features": "fusion",
+   "family": "svm",
+   "params": {
+    "m__gamma": "scale",
+    "m__C": 3
+   },
+   "cvBalancedAccuracy": 0.8785,
+   "testAccuracy": 0.8462,
+   "testBalancedAccuracy": 0.8542,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5385,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 142,
+   "testRows": 39,
+   "seconds": 17.1
+  },
+  {
+   "seed": 14,
+   "features": "base",
+   "family": "logistic",
+   "params": {
+    "m__C": 10
+   },
+   "cvBalancedAccuracy": 0.7815,
+   "testAccuracy": 0.7714,
+   "testBalancedAccuracy": 0.75,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.4857,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 35,
+   "seconds": 15.0
+  },
+  {
+   "seed": 14,
+   "features": "rich",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.7991,
+   "testAccuracy": 0.8,
+   "testBalancedAccuracy": 0.7604,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.4857,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 35,
+   "seconds": 16.5
+  },
+  {
+   "seed": 14,
+   "features": "fusion",
+   "family": "logistic",
+   "params": {
+    "m__C": 0.3
+   },
+   "cvBalancedAccuracy": 0.8278,
+   "testAccuracy": 0.9143,
+   "testBalancedAccuracy": 0.9062,
+   "testPlaceAccuracy": 0.9231,
+   "baselineAccuracy": 0.4857,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 144,
+   "testRows": 35,
+   "seconds": 16.1
+  },
+  {
+   "seed": 15,
+   "features": "base",
+   "family": "gradient_boosting",
+   "params": {
+    "m__max_iter": 100,
+    "m__max_depth": 2,
+    "m__learning_rate": 0.03,
+    "m__l2_regularization": 5.0
+   },
+   "cvBalancedAccuracy": 0.8235,
+   "testAccuracy": 0.7632,
+   "testBalancedAccuracy": 0.6667,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5263,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 38,
+   "seconds": 15.1
+  },
+  {
+   "seed": 15,
+   "features": "rich",
+   "family": "extra_trees",
+   "params": {
+    "m__n_estimators": 150,
+    "m__min_samples_leaf": 3,
+    "m__max_features": 0.5
+   },
+   "cvBalancedAccuracy": 0.8276,
+   "testAccuracy": 0.7895,
+   "testBalancedAccuracy": 0.6944,
+   "testPlaceAccuracy": 0.8462,
+   "baselineAccuracy": 0.5263,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 38,
+   "seconds": 15.8
+  },
+  {
+   "seed": 15,
+   "features": "fusion",
+   "family": "gradient_boosting",
+   "params": {
+    "m__max_iter": 200,
+    "m__max_depth": 3,
+    "m__learning_rate": 0.03,
+    "m__l2_regularization": 5.0
+   },
+   "cvBalancedAccuracy": 0.8184,
+   "testAccuracy": 0.6579,
+   "testBalancedAccuracy": 0.5915,
+   "testPlaceAccuracy": 0.6923,
+   "baselineAccuracy": 0.5263,
+   "trainPlaces": 38,
+   "testPlaces": 13,
+   "trainRows": 143,
+   "testRows": 38,
+   "seconds": 16.2
+  }
+ ]
+}

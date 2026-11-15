@@ -205,6 +205,11 @@ Server-Sent Events while the scenes finish, so a client can draw the series as i
 | `GET /health` | `{status, tokenConfigured, maxJobs}` |
 | `GET /series/stream` | SSE: `meta`, then `rows` (cache first, then one event per finished scene), `scene_error`, `done` (or `fatal`) |
 | `GET /series` | The same data as one JSON document, once every scene is done |
+| `GET /rain/stream` | SSE: `meta`, `rows` (`{date, t, mm, run}`, cache first, then batches, newest day first), `done` (or `fatal`). NASA GPM IMERG daily rain at the point's 0.1 degree cell |
+| `GET /rain` | The same rain data as one JSON document |
+| `GET /forecast/stream` | SSE: `meta`, `progress` (`{phase, done, total}` while the history is collected), `result`, `done` (or `fatal`). Monthly radar backscatter and rain forecast to 2030 |
+| `GET /forecast` | The same forecast as one JSON document |
+| `GET /regions`, `GET /regions/{id}` | Ready-made regional forecasts (`amazon`, `sao-paulo`, `rio-grande-do-sul`): the same shape as `/forecast` plus `samples` and `region`, built ahead so nothing loads when one is picked |
 
 Query parameters (both series endpoints): `lon`, `lat` (required), `start`, `end`, `dataset`
 (`auto`, `NISAR`, `OPERA`), `window_m` (30 to 5000), `max_results` (default 400, max 1000),
@@ -219,9 +224,102 @@ are served from the same cache as the CLI (`ASF_CACHE_DIR`, default `out`).
 
 Environment: `ASF_CACHE_DIR` (cache folder), `ASF_API_CORS` (comma-separated allowed origins,
 default the Vite dev server), `ASF_API_MAX_JOBS` (concurrent requests, default 4; more get HTTP 503).
-The API serves the SAR backscatter only; IMERG rain is a CLI output for now.
+Rain (`/rain`, `/rain/stream`) takes `lon`, `lat` (60S to 60N), `start`, `end`, `workers`, `cache`; it needs the one-time
+GES DISC authorization described above. Rain is cached per 0.1 degree grid cell (`imerg_cell_<i>_<j>`), so every
+point inside the same cell shares it. Clients are expected to ask for short date ranges (for example 30-day chunks
+around the date being looked at) instead of whole histories.
+
+Speed: ASF searches and CMR granule lists are remembered for a few minutes (an hour for ranges that ended days ago),
+and NISAR scenes run in one long-lived process pool (`ASF_API_PROC_WORKERS`, default 3) so requests do not pay for
+starting new interpreters.
 Timing is network-bound: a NISAR scene takes about a minute and a half, an OPERA scene a few
 seconds, so the first request for a new point is slow and repeats are instant.
+
+## Forecast to 2030 (`/forecast`)
+Machine learning (scikit-learn) that learns from the history of one point and projects it to the end of 2030.
+`GET /forecast/stream?lon=&lat=&until=2030-12&rain_scale=1` (`lat` within 60S to 60N, where IMERG rain exists).
+The point is snapped to 0.01 degree (about 1 km), so nearby clicks share one history.
+
+**Data it collects by itself** (and caches, so only the first request for a point is slow):
+- Radar: one OPERA Sentinel-1 C-band scene per month since 2016, always from the geometry (burst, track,
+  direction) the point has most scenes in, so the incidence angle does not change between months. Both the
+  co- and the cross-polarization are forecast. About 120 scenes: a few minutes the first time, `progress`
+  events report it. NISAR is not used: it only exists since October 2025, far too short to learn from.
+- Rain: GPM IMERG monthly (final run) since 2016, plus, for the months the monthly product does not cover yet,
+  the sum of the daily Late run (shared with `/rain`). Only complete months are used.
+
+**Models** (`forecast.py`), compared by a rolling-origin backtest (train on the past, forecast the next 12 months,
+move the origin forward, three folds, the future is never seen):
+`seasonal` (yearly cycle, two harmonics), `seasonal+trend`, `seasonal+trend+rain` (monthly rain anomaly as an
+extra input) and `...+rain+boosting` (gradient boosting on the residuals) for backscatter; `seasonal` and
+`seasonal+trend` on log(1+rain) for rain. The one with the lowest error wins and is refitted on all the data.
+
+**What the result tells you:** `model`, `backtest` (`mae`, `rmse`, `naiveMae`, `skill`, error of every candidate),
+`reliable` (`skill` above 0 against "same month last year" and at least 48 months), `trendPerDecade`, `history`,
+`forecast` (`v`, `lo`, `hi` per month), `yearly` summaries and `notes`.
+
+## Risks (`risk` in the `/forecast` result)
+`risk.py` turns the same history into four screening signals for the place, each with a score from 0 to 1, a level
+(low below 0.3, moderate below 0.6, high from 0.6) and the evidence behind it (templates with numbers, so a client can
+translate them): vegetation loss (a lasting drop of the cross-polarization after removing the yearly cycle, found as the
+most likely single step change), flood (past inundation-like backscatter, rain of the last 3 months against the place's
+own climate, forecast wet-season peak against past peaks), drought and fire (standardised 3-month rain and the forecast
+of the next six months) and unusual change (an IsolationForest over the monthly [VV, VH, VV-VH, rain, 3-month rain]
+vectors). Everything is learned from the place's own history, so it is never compared with another place's numbers.
+
+**Pre-training and training protocol.** A classifier recognises the land cover (forest, other vegetation, city, open
+water) and decides which risks make sense (vegetation loss is meaningless over a city, drought over a lake). It learns
+from 51 reference places picked by hand (`pretrain.py`): the monthly VV and VH radar history (2019 on, read through the
+same API code and cached) and, when available, the color of the Sentinel-2 mosaic around the place (`optical.py`, one tile
+request). `training.py` trains it by the rules of the project document:
+
+- a simple reference first (a depth-2 decision tree on mean VV and VH); the model is only used if it beats it;
+- the test is made of places the model never saw, in years it never saw (train up to 2022, test 2023 on); no random
+  split of rows; scales are fitted on the training part only; settings are chosen by cross-validation grouped by place;
+- one round = the whole protocol with another random choice of test places (five model families and three feature sets
+  are tuned in every round); at least 10 rounds, more while the mean test accuracy is below the target, and the numbers
+  shown are the mean and the spread over the rounds. Every round is written to `models/training_log.json`.
+
+Result of the last run (16 rounds, 13 places never seen in every test): radar + ground color **85 %** (spread 8.6 points,
+worst round 66 %, best 100 %), radar alone 73 %, the simple reference 54 %; the model beat the reference in 15 of 16 rounds.
+It did not reach the 90 % target: with 51 places each test has only about 13 places, so a single hard place moves the
+number a lot, and "other vegetation" is a mixed class. More labeled places are the way up. Without a ground color
+(optical tile unreachable) the radar-only classifier of the same file answers.
+
+    uv run python -m asf_cleaner.pretrain collect --shard 0/4    # read the history of the reference places (cached;
+                                                                 # run shards 0/4 .. 3/4 at once to go faster)
+    uv run python -m asf_cleaner.pretrain optical                # ground color of the reference places
+    uv run python -m asf_cleaner.training --rounds 10            # protocol, then fit on everything -> models/risk_model.joblib
+
+Without `models/risk_model.joblib` the risks still work, only without the land-cover step. These are screening
+signals ("look here first"), not predictions of events.
+
+## Ready-made regions
+`regions.py` builds, ahead of time, a forecast with risks for whole regions: a few sample places spread over each one
+(from the cached reference places where possible) go through the same forecast and risk code as a clicked point, and the
+results are averaged into one result with the same shape. For every risk the riskiest sample is kept (so a hot spot is not
+averaged away) and the samples are listed. Files go to `models/regions/<id>.json`:
+
+    uv run python -m asf_cleaner.regions build               # all regions
+    uv run python -m asf_cleaner.regions build amazon --missing
+
+`/forecast` also takes `window_m` (the radar window around the point, snapped to 500, 1000, 2000 or 5000 m) so a client
+can analyse an area instead of a point.
+
+**Honest limits.** Future rain is unknown, so the backscatter forecast assumes normal rain; `rain_scale`
+(0.5 to 1.5) is a what-if for the rain models, not a prediction. The 80 % band comes from the backtest errors
+and is widened with the years ahead because the backtest only looks 12 months out. Fewer than 39 months of data
+(or less than half of the months filled) is refused instead of guessed. The model knows nothing about land-cover
+change, floods or fires that have not happened.
+
+Code layout: `api.py` (routes and job slots), `sse.py` (streaming), `memo.py` (expiring cache), `history.py`
+(collects the history), `forecast.py` (the forecast models, no network), `risk.py` (risks and land cover, no network),
+`pretrain.py` (pre-training), `imerg.py`, `runner.py`, `workers.py`.
+
+Tests: `uv run pytest` runs unit tests (cache, SSE, runner, history, forecast, risk, IMERG, NISAR, OPERA) and
+integration tests that start a real uvicorn server on a socket (`tests/test_integration.py`): events arrive while work
+is still running, a client that leaves cancels the work and frees its slot, a busy server answers 503, CORS, concurrent
+clients, and the forecast with risks over real HTTP. No network and no token are needed.
 
 ## Caveats
 - **Masks differ by dataset.** OPERA: shadow/layover/invalid pixels are removed (mask 0 = valid).

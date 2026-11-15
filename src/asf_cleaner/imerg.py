@@ -18,6 +18,7 @@ import pandas as pd
 import requests
 
 from . import cache
+from .memo import TTLCache
 from .config import IMERG_COLLECTIONS, IMERG_LOOKBACK_DAYS, PROCESSING_VERSION
 from .runner import retry, run_parallel
 from .stream import get_session
@@ -51,7 +52,21 @@ def grid_index(lon: float, lat: float) -> tuple[int, int]:
 
 
 # ---- finding the daily granules (CMR, no auth) ----------------------------------------------
+_granules = TTLCache(128)
+
+
 def list_granules(run: str, d0: date, d1: date) -> dict[date, dict]:
+    """CMR granule list, remembered for a while (it is asked again for every date chunk of a point)."""
+    key = (run, d0, d1)
+    hit = _granules.get(key, 3600 if d1 < date.today() - timedelta(days=3) else 600)
+    if hit is not None:
+        return hit
+    found = _list_granules(run, d0, d1)
+    _granules.put(key, found)
+    return found
+
+
+def _list_granules(run: str, d0: date, d1: date) -> dict[date, dict]:
     _, cid = IMERG_COLLECTIONS[run]
     found, page = {}, 1
     while True:
@@ -115,6 +130,30 @@ def parse_point(content: bytes) -> dict:
         return {"precip": val, "units": units.decode() if isinstance(units, bytes) else str(units),
                 "lon": float(np.asarray(find("lon")[()]).ravel()[0]),
                 "lat": float(np.asarray(find("lat")[()]).ravel()[0])}
+
+
+def monthly_point_url(base: str, i: int, j: int) -> str:
+    """The monthly product keeps its variables inside the `Grid` group."""
+    ce = quote(f"/Grid/precipitation[0][{i}][{j}];/Grid/lon[{i}];/Grid/lat[{j}]", safe="/[];")
+    return f"{base}.dap.nc4?dap4.ce={ce}"
+
+
+def fetch_monthly_point(item: dict, *, i: int, j: int, token: str) -> list[dict]:
+    """Rain of one month at a cell, in mm (the product stores the mean rate in mm/hr)."""
+    def go():
+        r = get_session().get(monthly_point_url(item["url"], i, j), timeout=90, headers={"Authorization": f"Bearer {token}"})
+        if r.status_code in (401, 403):
+            raise PermissionError(ACCESS_HELP.format(code=r.status_code))
+        if r.status_code in (400, 404):
+            raise ValueError(f"OPeNDAP HTTP {r.status_code} for {item['granule']}: {r.text[:200]!r}")
+        r.raise_for_status()
+        return parse_point(r.content)
+
+    p = retry(go)
+    d: date = item["date"]
+    hours = 24 * pd.Period(d, freq="M").days_in_month
+    mm = float("nan") if np.isnan(p["precip"]) else p["precip"] * hours
+    return [{"month": f"{d:%Y-%m}", "mm": mm, "source": "monthly", "processing_version": PROCESSING_VERSION}]
 
 
 def fetch_point(item: dict, *, i: int, j: int, token: str) -> list[dict]:

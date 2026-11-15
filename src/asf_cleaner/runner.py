@@ -1,9 +1,11 @@
 """Run per-scene work in parallel (threads or spawned processes) with isolation and retries."""
 import logging
 import multiprocessing
+import os
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 
 import requests
@@ -91,7 +93,22 @@ def run_parallel(fn, items, workers: int, kind: str, label=str) -> list[Result]:
     return results
 
 
-def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | None = None):
+_shared: ProcessPoolExecutor | None = None
+_shared_lock = threading.Lock()
+SHARED_PROCESSES = int(os.environ.get("ASF_API_PROC_WORKERS", "3"))
+
+
+def shared_process_pool() -> ProcessPoolExecutor:
+    """One long-lived process pool for the API: spawning interpreters (and importing h5py, pandas...)
+    costs seconds, so requests reuse the same workers instead of starting new ones every time."""
+    global _shared
+    with _shared_lock:
+        if _shared is None or getattr(_shared, "_broken", False):
+            _shared = ProcessPoolExecutor(max_workers=SHARED_PROCESSES, mp_context=multiprocessing.get_context("spawn"))
+        return _shared
+
+
+def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | None = None, shared: bool = False):
     """Like run_parallel, but yields each Result as soon as it finishes (for streaming clients).
 
     Setting `cancel` (or closing the generator) stops waiting and cancels scenes not yet started.
@@ -109,11 +126,20 @@ def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | 
             yield Result(it, rows, err, secs)
         return
 
-    if kind == "process":
+    use_shared = shared and kind == "process"
+    if use_shared:
+        pool = shared_process_pool()
+    elif kind == "process":
         pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
     else:
         pool = ThreadPoolExecutor(max_workers=workers)
-    futures = {pool.submit(_timed, fn, it): it for it in items}
+    try:
+        futures = {pool.submit(_timed, fn, it): it for it in items}
+    except BrokenProcessPool:  # a worker died earlier: start a fresh pool once
+        if not use_shared:
+            raise
+        pool = shared_process_pool()
+        futures = {pool.submit(_timed, fn, it): it for it in items}
     pending = set(futures)
     try:
         while pending:
@@ -127,4 +153,8 @@ def iter_parallel(fn, items, workers: int, kind: str, cancel: threading.Event | 
                 except Exception as e:  # pool-level failure (e.g. a worker process died)
                     yield Result(futures[f], None, f"{type(e).__name__}: {e}", 0.0)
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        if use_shared:  # keep the workers; only drop what this request had not started
+            for f in pending:
+                f.cancel()
+        else:
+            pool.shutdown(wait=False, cancel_futures=True)

@@ -27,6 +27,7 @@ EXECUTORS = {"NISAR": "process", "OPERA": "thread"}
 IMERG_COLLECTIONS = {
     "final": ("GPM_3IMERGDF", "C2723754864-GES_DISC"),
     "late": ("GPM_3IMERGDL", "C2723754859-GES_DISC"),
+    "monthly": ("GPM_3IMERGM", "C2723754851-GES_DISC"),  # final run only, ends 2025-09-30
 }
 IMERG_LOOKBACK_DAYS = 30  # rain is fetched this many days before --start (for antecedent sums)
 
