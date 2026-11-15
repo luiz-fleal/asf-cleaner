@@ -105,9 +105,7 @@ merged. Analyse each on its own. By default (`--dataset auto`) the time range yo
 - The chosen mode and the reason are logged at startup; force one with `--dataset`.
 
 NISAR coverage depends on location. The archive starts in 2025-10 worldwide, but your point may
-have its first scene later (the point `-47.9, -15.8` starts in 2026-06). If a NISAR run returns
-nothing, check the range. Longitude is negative west of Greenwich (`-47.9` is Brazil, `47.9` is
-Madagascar).
+have its first scene later.
 
 ## CLI reference
 
