@@ -24,8 +24,9 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
-from . import cache, history, imerg, optical, regions
+from . import assistant, cache, history, imerg, optical, regions
 from . import forecast as fc
 from . import risk
 from .memo import TTLCache
@@ -52,7 +53,7 @@ app = FastAPI(title="asf-cleaner API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("ASF_API_CORS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -140,6 +141,24 @@ def events(lon, lat, start_s, end_s, dataset_req, window_m, max_results, workers
         if use_cache and new_rows:  # also on cancel, so partial progress is not lost
             cache.save(cache_file, cached, new_rows)
     yield "done", {"fetched": done - len(have) - failed, "failed": failed, "seconds": round(time.perf_counter() - t0, 1)}
+
+
+class AskBody(BaseModel):
+    question: str = Field(max_length=assistant.MAX_QUESTION)
+    lang: str = "en"
+    context: dict | None = None
+
+
+@app.post("/assistant")
+def ask_assistant(body: AskBody):
+    """Open questions from the map's AI bar. Commands never come here; the page handles those itself."""
+    if not assistant.configured():
+        return {"configured": False, "answer": None}
+    try:
+        return {"configured": True, "answer": assistant.ask(body.question, body.lang, body.context)}
+    except Exception as exc:  # network, quota, bad key: the page shows a calm message, not a stack trace
+        log.warning("assistant failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The assistant could not answer now.")
 
 
 @app.get("/health")

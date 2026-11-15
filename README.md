@@ -209,6 +209,7 @@ Server-Sent Events while the scenes finish, so a client can draw the series as i
 | `GET /rain` | The same rain data as one JSON document |
 | `GET /forecast/stream` | SSE: `meta`, `progress` (`{phase, done, total}` while the history is collected), `result`, `done` (or `fatal`). Monthly radar backscatter and rain forecast to 2030 |
 | `GET /forecast` | The same forecast as one JSON document |
+| `POST /assistant` | Body `{question, lang, context}`. Open questions from the map's AI bar, answered by a Claude model that may only use the `context` the page sends (what the map is showing). Needs `ANTHROPIC_API_KEY` (model `ASF_ASSISTANT_MODEL`, default `claude-sonnet-5-5`); without a key it returns `{configured: false}` and the page keeps working with its built-in commands. Inputs are length-bounded; failures are HTTP 502 with a short message |
 | `GET /regions`, `GET /regions/{id}` | Ready-made regional forecasts (`amazon`, `sao-paulo`, `rio-grande-do-sul`): the same shape as `/forecast` plus `samples` and `region`, built ahead so nothing loads when one is picked |
 
 Query parameters (both series endpoints): `lon`, `lat` (required), `start`, `end`, `dataset`
