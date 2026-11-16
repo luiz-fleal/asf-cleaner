@@ -98,7 +98,7 @@ def test_fixed_sentence_when_the_second_round_fails():
             raise RuntimeError("boom")
         return tool([{"type": "layer", "id": "imerg", "on": False}])
 
-    out = assistant.ask("hide rain", "pt", "", post=post)
+    out = assistant.ask("esconda a chuva", "pt", "", post=post)
     assert out["answer"] == "chuva desligada." and out["actions"][0]["on"] is False
 
 
@@ -139,3 +139,18 @@ def test_rate_limit_per_client():
     rl = assistant.RateLimit(3)
     assert [rl.allow("a", now=i) for i in range(4)] == [True, True, True, False]
     assert rl.allow("b", now=1) and rl.allow("a", now=100)  # another client, and a new minute
+
+
+def test_answers_read_like_a_person_wrote_them():
+    raw = "**Great question.** The rain layer \u2014 shown in violet \u2013 is IMERG:\n- it is daily\n- it is coarse\n1. Open the map"
+    out = assistant.humanize(raw)
+    assert "\u2014" not in out and "\u2013" not in out and "*" not in out and "\n" not in out
+    assert "- it" not in out and "1." not in out
+    assert out.startswith("Great question.") and "It is daily. It is coarse." in out
+
+
+def test_the_language_of_the_question_wins():
+    assert assistant.guess_lang("como o modelo aprende?", "en") == "pt"
+    assert assistant.guess_lang("\u00bfc\u00f3mo funciona el pron\u00f3stico?", "en") == "es"
+    assert assistant.guess_lang("show me the rain", "pt") == "en"
+    assert assistant.guess_lang("ok", "es") == "es"  # nothing to go on: the page's language

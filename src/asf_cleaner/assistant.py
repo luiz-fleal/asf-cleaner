@@ -76,13 +76,15 @@ HONEST WORDING. Say "the radar response changed", "a forecast has a band", "a sc
 
 PLACES you can fly to, as (latitude, longitude): {places}. For any other place use your best knowledge of its coordinates.
 
+WHERE THINGS ARE. The left panel (Layers) holds the base map, the six NASA layers with their opacity, the 3D view options and the natural-disaster simulations. The right panel (Inspector) has three tabs: Data (the radar and rain series of a point or area), Forecast (the verdict, then Risks, Places and Charts) and Regions (the three ready-made forecasts). The top bar has city shortcuts, search, the AI button and the language buttons. The timeline is at the bottom.
+
 PAGES. The site has a presentation at "/" (the story), a satellite story at "/satelite", this map at "/mapa", and a technical page "Data and methods" at "/tecnico".\
 """
 
 KNOWLEDGE = _KNOWLEDGE.format(places=PLACES)
 
 SYSTEM = """\
-You are the assistant inside the SARIS map. Answer in the language the person writes in (English, Portuguese or Spanish); if you cannot tell, use {language}. Use at most four short sentences, for a non-specialist; be friendly and concrete.
+You are the assistant inside the SARIS map. Answer in the language the person writes in (English, Portuguese or Spanish); if you cannot tell, use {language}. Keep it to about sixty words and at most four short sentences, for a non-specialist; be friendly and concrete. Pick the two or three most useful things instead of covering everything.
 
 RULES
 1. A QUESTION about the project, the data, the model, a risk, a number or "how does this work" gets a TEXT answer from the knowledge base. Do not call the tool for questions.
@@ -92,7 +94,8 @@ RULES
 5. A simulation (earthquake, flood, wildfire, storm) starts at the selected place, or at the centre of the view; if the person names a place, put its lat and lon in the action. Say it is an illustration of scale, not a forecast.
 6. Prefer the ready-made regions for the Amazon, São Paulo and Rio Grande do Sul. For flying use zoom 3 for the continent, 6 for a country, 10 for a city, 13 for a neighbourhood.
 7. If something is outside what the map can do, say so plainly. Never write your reasoning, only the answer.
-8. Only talk about SARIS and its topics (radar, rain, the Amazon and South America, the data, the model, the map). For anything else, politely say you can only help with the map and the project.
+8. Write the way a friendly person talks: plain flowing sentences in one short paragraph. No bullet points, no numbered lists, no headings, no bold, no emojis, no tables, and never a dash used as punctuation (no em dash, no en dash). Avoid stock phrases and cheerful openings like "Great question"; just answer.
+9. Only talk about SARIS and its topics (radar, rain, the Amazon and South America, the data, the model, the map). For anything else, politely say you can only help with the map and the project.
 
 KNOWLEDGE BASE
 {knowledge}
@@ -138,6 +141,30 @@ REGION_NAME = {"amazon": "Amazon", "sao-paulo": "São Paulo", "rio-grande-do-sul
 THINKING = re.compile(r"<thinking>.*?</thinking>|</?thinking>", re.S | re.I)
 
 
+MD_LINE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+", re.M)
+
+
+def humanize(text: str) -> str:
+    """The answers are meant to read like a person wrote them: plain sentences, no lists, no markdown, no travessão.
+    The prompt asks for that; this makes sure, whatever the model does."""
+    lines = []
+    for ln in text.split("\n"):
+        if MD_LINE.match(ln):                                  # a list item becomes a sentence of its own
+            ln = MD_LINE.sub("", ln).strip()
+            ln = ln[:1].upper() + ln[1:]
+            if ln and ln[-1] not in ".!?:":
+                ln += "."
+        lines.append(ln)
+    t = "\n".join(lines)
+    t = re.sub(r"[*_`#]+", "", t)                              # bold, italics, code, headings
+    t = re.sub(r"\s*[\u2014\u2013]\s*", ", ", t)                # travessões become a comma
+    t = re.sub(r"\s*\n+\s*", " ", t)                           # one paragraph
+    t = re.sub(r",\s*,", ",", t)
+    t = re.sub(r"([.!?:;])\s*,", r"\1", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    return re.sub(r"(?<=[a-z\u00e0-\u00ff0-9\)])\s+(?=[A-Z\u00c0-\u00dd][a-z\u00e0-\u00ff])", lambda m: m.group(0), t)
+
+
 def strip_thinking(text: str) -> str:
     """Nova models sometimes print their reasoning in <thinking> tags; the person never needs to see it."""
     return re.sub(r"\n{3,}", "\n\n", THINKING.sub("", text)).strip()
@@ -169,6 +196,19 @@ def describe(actions: list[dict], lang: str) -> str:
         elif t == "base":
             parts.append(("Base map changed", "Mapa-base trocado", "Mapa base cambiado")[i])
     return ". ".join(dict.fromkeys(parts)) + "." if parts else DONE.get(lang, DONE["en"])
+
+
+PT_HINT = re.compile(r"\b(n\u00e3o|voc\u00ea|uma|como|para|pra|com|mostra\w*|abr\w+|lig\w+|chuva|previs\u00e3o|obrigad\w*|por que|porque)\b|\u00e7\u00e3o|\u00f5es", re.I)
+ES_HINT = re.compile(r"\b(c\u00f3mo|qu\u00e9|una|para|con|muestra\w*|abre|enciende|lluvia|pron\u00f3stico|gracias|por qu\u00e9|porque|est\u00e1)\b|\u00bf|\u00f1|ci\u00f3n", re.I)
+EN_HINT = re.compile(r"\b(the|what|how|show|open|turn|why|where|and|is|are|please|rain|forecast)\b", re.I)
+
+
+def guess_lang(question: str, default: str = "en") -> str:
+    """The language the person wrote in (the page's language only breaks a tie), so a question in Portuguese gets Portuguese
+    even when the interface is in English."""
+    scores = {"pt": len(PT_HINT.findall(question)), "es": len(ES_HINT.findall(question)), "en": len(EN_HINT.findall(question))}
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 and scores[best] >= scores.get(default, 0) else default
 
 
 def configured() -> bool:
@@ -245,19 +285,20 @@ def ask(question: str, lang: str, state: str | None, history=None, *, post=reque
     q, st, turns = clean(question, state, history)
     if not q:
         raise ValueError("empty question")
+    lang = guess_lang(q, lang)
     key = env_value("BEDROCK_API_KEY")
     region = env_value("BEDROCK_REGION") or "us-east-1"
     body = {
         "system": [{"text": SYSTEM.format(language=LANGS.get(lang, "English"), knowledge=KNOWLEDGE, state=st or "nothing selected")}],
         "messages": [*turns, {"role": "user", "content": [{"text": q}]}],
-        "inferenceConfig": {"maxTokens": 500, "temperature": 0.2},
+        "inferenceConfig": {"maxTokens": 350, "temperature": 0.3},
         "toolConfig": {"tools": [TOOL], "toolChoice": {"auto": {}}},
     }
     url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{quote(model_id(), safe='')}/converse"
     res = post(url, json=body, timeout=30, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     res.raise_for_status()
     blocks = res.json().get("output", {}).get("message", {}).get("content", [])
-    text = strip_thinking(" ".join(b["text"].strip() for b in blocks if "text" in b))
+    text = humanize(strip_thinking(" ".join(b["text"].strip() for b in blocks if "text" in b)))
     actions: list[dict] = []
     for b in blocks:
         use = b.get("toolUse")
@@ -283,7 +324,7 @@ def _follow_up(post, url: str, key: str, body: dict, blocks: list, actions: list
                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
         res.raise_for_status()
         out = res.json().get("output", {}).get("message", {}).get("content", [])
-        return strip_thinking(" ".join(b["text"] for b in out if "text" in b))
+        return humanize(strip_thinking(" ".join(b["text"] for b in out if "text" in b)))
     except Exception:
         return ""
 
