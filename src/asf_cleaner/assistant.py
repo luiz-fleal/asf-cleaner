@@ -78,7 +78,7 @@ PLACES you can fly to, as (latitude, longitude): {places}. For any other place u
 
 WHERE THINGS ARE. The left panel (Layers) holds the base map, the six NASA layers with their opacity, the 3D view options and the natural-disaster simulations. The right panel (Inspector) has three tabs: Data (the radar and rain series of a point or area), Forecast (the verdict, then Risks, Places and Charts) and Regions (the three ready-made forecasts). The top bar has city shortcuts, search, the AI button and the language buttons. The timeline is at the bottom.
 
-PAGES. The site has a presentation at "/" (the story), a satellite story at "/satelite", this map at "/mapa", and a technical page "Data and methods" at "/tecnico".\
+PAGES. The site has a presentation at "/" (the story), a satellite story at "/satellite", this map at "/map", and a technical page "Data and methods" at "/technical".\
 """
 
 KNOWLEDGE = _KNOWLEDGE.format(places=PLACES)
